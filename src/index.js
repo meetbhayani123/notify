@@ -14,6 +14,7 @@ const { isLiveMatch, matchLabel }                 = require('./matchFilter');
 const { parseScore, getCurrentInningsScore }      = require('./scoreParser');
 const { initDB, checkForWicket }                  = require('./stateManager');
 const { initTelegram, sendTelegramAlert, sendTestScoreSummary } = require('./notifier');
+const { initTeamResolver }                        = require('./teamResolver');
 const express                                     = require('express');
 
 // ── Config ──────────────────────────────────────────────
@@ -87,7 +88,7 @@ async function tick() {
     // ── Test mode: collect live matches with actual scores ──
     const isLive = isLiveMatch(match);
     if (TEST_MODE && isLive && (match.j || match.k)) {
-      const label = matchLabel(id, match);
+      const label = await matchLabel(id, match);
       const score = getCurrentInningsScore(match);
       liveMatches.push({
         label,
@@ -108,7 +109,7 @@ async function tick() {
     const result = await checkForWicket(id, score);
     if (!result.wicketFell) continue;
 
-    const label = matchLabel(id, match);
+    const label = await matchLabel(id, match);
     console.log(
       `\n🚨 WICKET in 1st over! ${label} — ${score.runs}/${score.wickets} (${score.overs} ov)`
     );
@@ -160,6 +161,9 @@ async function main() {
 
   // Initialise MongoDB
   await initDB();
+
+  // Load Team Name Mapping (Memory -> MongoDB -> CREX)
+  await initTeamResolver();
 
   // ── Render Web Service Support (Dummy Server) ─────────
   const app = express();

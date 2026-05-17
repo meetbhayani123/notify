@@ -33,16 +33,20 @@ function isLiveMatch(match) {
   return true;
 }
 
+const { resolveTeamName } = require('./teamResolver');
+
 /**
  * Build a human-readable label for a match.
  *
  * @param {string} matchId
  * @param {object} match
- * @returns {string} e.g. "[T20I] K vs I (id: 1196)"
+ * @returns {Promise<string>} e.g. "[T20I] RCB vs PBKS (id: 1196)"
  */
-function matchLabel(matchId, match) {
+async function matchLabel(matchId, match) {
   const format = match.fo || 'Match';
-  return `[${format}] ${match.b} vs ${match.c} (id: ${matchId})`;
+  const teamA = await resolveTeamName(match.b);
+  const teamB = await resolveTeamName(match.c);
+  return `[${format}] ${teamA} vs ${teamB} (id: ${matchId})`;
 }
 
 module.exports = { isLiveMatch, matchLabel };
