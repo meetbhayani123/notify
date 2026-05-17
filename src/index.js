@@ -164,7 +164,20 @@ async function main() {
   // ── Render Web Service Support (Dummy Server) ─────────
   const app = express();
   const port = process.env.PORT || 3000;
+  
+  // Basic root endpoint
   app.get('/', (req, res) => res.send('Cricket Wicket Alert System is running!'));
+  
+  // Dedicated JSON Health Check Endpoint
+  app.get('/health', (req, res) => {
+    res.json({
+      status: 'ok',
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+      mode: TEST_MODE ? 'TEST_MODE' : 'PRODUCTION'
+    });
+  });
+
   app.listen(port, () => {
     console.log(`🌐 Health check server listening on port ${port}`);
   });
