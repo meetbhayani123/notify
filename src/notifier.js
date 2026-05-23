@@ -66,6 +66,38 @@ async function sendTelegramReply(replyToMessageId, text) {
 }
 
 /**
+ * Send the T20 Over Runs Trick Alert to the trick notify group/channel.
+ */
+async function sendTrickNotifyAlert({ matchLabel, innings, battingTeam, runs, threshold }) {
+  const time = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+  const chatId = process.env.TELEGRAM_TRICK_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
+  
+  const message = `📊 *TRICK ALERT — ${innings === 1 ? '1st' : '2nd'} Innings Over Runs!*
+
+🏏 Match   : ${matchLabel}
+🏏 Batting : *${battingTeam}* (${innings === 1 ? '1st' : '2nd'} Innings)
+📈 1st Over: *${runs} runs*
+🎯 Target  : >= ${threshold} runs
+⚡ Event   : 1st Over score met the trick criteria!
+🕐 Time    : ${time}
+
+_Powered by crex.com live data_`;
+
+  const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+  try {
+    const response = await axios.post(url, {
+      chat_id: chatId,
+      text: message,
+      parse_mode: 'Markdown'
+    });
+    return response.data;
+  } catch (err) {
+    console.error('❌ Telegram trick send failed:', err.response?.data?.description || err.message);
+    throw err;
+  }
+}
+
+/**
  * Send the test mode live scoreboard.
  */
 async function sendTestScoreSummary(liveMatches) {
@@ -83,4 +115,10 @@ async function sendTestScoreSummary(liveMatches) {
   await sendMessage(message);
 }
 
-module.exports = { initTelegram, sendTelegramAlert, sendTelegramReply, sendTestScoreSummary };
+module.exports = {
+  initTelegram,
+  sendTelegramAlert,
+  sendTelegramReply,
+  sendTrickNotifyAlert,
+  sendTestScoreSummary
+};

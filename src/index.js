@@ -20,9 +20,18 @@ const {
   createWicketTrick,
   getActiveWicketTrick,
   resolveWicketTrick,
-  sweepOrphanedTricks
+  sweepOrphanedTricks,
+  getFirstOverRuns,
+  checkOverRunsTrickEvaluated,
+  saveOverRunsTrickEvaluation
 } = require('./stateManager');
-const { initTelegram, sendTelegramAlert, sendTelegramReply, sendTestScoreSummary } = require('./notifier');
+const {
+  initTelegram,
+  sendTelegramAlert,
+  sendTelegramReply,
+  sendTrickNotifyAlert,
+  sendTestScoreSummary
+} = require('./notifier');
 const { initTwilio, triggerVoiceAlert }           = require('./twilioNotifier');
 const { initTeamResolver, resolveTeamName }        = require('./teamResolver');
 const logger                                      = require('./logger');
@@ -143,6 +152,94 @@ async function handleWicketTrickCheck(matchId, score, match) {
   }
 }
 
+/**
+ * Helper to check if a match matches common T20/IPL/Hundred formats.
+ */
+function isT20Match(match) {
+  if (!match.fo) return false;
+  const fo = match.fo.toLowerCase();
+  return (
+    fo.includes('t20') ||
+    fo.includes('ipl') ||
+    fo.includes('hundred') ||
+    fo.includes('bbl') ||
+    fo.includes('cpl') ||
+    fo.includes('psl') ||
+    fo.includes('wpl') ||
+    fo.includes('t-20')
+  );
+}
+
+const processingOverRuns = new Set();
+
+/**
+ * Checks and handles the 1st Over Runs trick for T20 matches.
+ */
+async function handleOverRunsTrickCheck(matchId, score, match) {
+  // Rule only applies to T20 matches
+  if (!isT20Match(match)) return;
+
+  // Must have completed the first over (balls >= 6)
+  if (score.balls < 6) return;
+
+  // Ensure we haven't already evaluated this match/innings
+  const evaluated = await checkOverRunsTrickEvaluated(matchId, score.innings);
+  if (evaluated) return;
+
+  const trickKey = `${matchId}_${score.innings}`;
+  if (processingOverRuns.has(trickKey)) return;
+
+  processingOverRuns.add(trickKey);
+  try {
+    // Get the exact runs at the end of the 1st over
+    const runsAtFirstOver = await getFirstOverRuns(matchId, score.innings, score);
+
+    // Check trick conditions:
+    // Innings 1: runs >= 14
+    // Innings 2: runs > 13 (which means >= 14)
+    const threshold = 14;
+    const isTargetMet = score.innings === 1 ? (runsAtFirstOver >= 14) : (runsAtFirstOver > 13);
+
+    const label = await matchLabel(matchId, match);
+    const battingTeam = await resolveTeamName(score.battingTeamKey);
+
+    if (isTargetMet) {
+      logger.success(`📊 [OVER RUNS TRICK SUCCESS] Match ${label} Innings ${score.innings} — ${runsAtFirstOver} runs (Threshold: ${score.innings === 1 ? '>= 14' : '> 13'}). Sending Alert.`);
+      await sendTrickNotifyAlert({
+        matchLabel: label,
+        innings: score.innings,
+        battingTeam,
+        runs: runsAtFirstOver,
+        threshold: score.innings === 1 ? 14 : 14
+      });
+      await saveOverRunsTrickEvaluation({
+        matchId,
+        innings: score.innings,
+        battingTeam,
+        runsAtFirstOver,
+        ballsAtEvaluation: score.balls,
+        notified: true,
+        status: 'NOTIFIED'
+      });
+    } else {
+      logger.info(`📊 [OVER RUNS TRICK SKIPPED] Match ${label} Innings ${score.innings} — ${runsAtFirstOver} runs. Did not meet criteria.`);
+      await saveOverRunsTrickEvaluation({
+        matchId,
+        innings: score.innings,
+        battingTeam,
+        runsAtFirstOver,
+        ballsAtEvaluation: score.balls,
+        notified: false,
+        status: 'SKIPPED'
+      });
+    }
+  } catch (err) {
+    logger.error(`❌ Error during Over Runs Trick evaluation for match ${matchId}:`, err);
+  } finally {
+    processingOverRuns.delete(trickKey);
+  }
+}
+
 // ── Single poll tick ────────────────────────────────────
 async function tick() {
   pollCount++;
@@ -179,6 +276,11 @@ async function tick() {
     // Process Wicket Trick state checks (non-blocking)
     handleWicketTrickCheck(id, score, match).catch((err) => {
       logger.error(`Error in handleWicketTrickCheck for match ${id}:`, err);
+    });
+
+    // Process Over Runs Trick state checks (non-blocking)
+    handleOverRunsTrickCheck(id, score, match).catch((err) => {
+      logger.error(`Error in handleOverRunsTrickCheck for match ${id}:`, err);
     });
 
     // Live Tracking Log for first over

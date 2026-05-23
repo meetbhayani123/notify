@@ -73,6 +73,21 @@ wicketTrickSchema.index({ matchId: 1, innings: 1 }, { unique: true });
 
 const WicketTrick = mongoose.model('WicketTrick', wicketTrickSchema);
 
+// Define the MongoDB Schema for the T20 Over Runs Trick
+const overRunsTrickSchema = new mongoose.Schema({
+  matchId: { type: String, required: true },
+  innings: { type: Number, required: true },
+  battingTeam: { type: String, required: true },
+  runsAtFirstOver: { type: Number, default: null },
+  ballsAtEvaluation: { type: Number, default: null },
+  notified: { type: Boolean, default: false },
+  status: { type: String, enum: ['PENDING', 'NOTIFIED', 'SKIPPED'], default: 'PENDING' }
+}, { timestamps: true });
+
+overRunsTrickSchema.index({ matchId: 1, innings: 1 }, { unique: true });
+
+const OverRunsTrick = mongoose.model('OverRunsTrick', overRunsTrickSchema);
+
 /**
  * Connect to MongoDB using the MONGODB_URI env variable.
  * Fallback to in-memory map if no URI is provided.
@@ -80,6 +95,7 @@ const WicketTrick = mongoose.model('WicketTrick', wicketTrickSchema);
 let dbConnected = false;
 const fallbackMap = new Map();
 const wicketTrickFallbackMap = new Map();
+const overRunsTrickFallbackMap = new Map();
 
 async function initDB() {
   if (process.env.MONGODB_URI) {
@@ -384,6 +400,86 @@ async function sweepOrphanedTricks(activeMatchIds, sendTelegramReplyFn) {
   }
 }
 
+/**
+ * Retrieve the runs scored at the end of the 1st over (exactly 6 balls).
+ * Looks up the FirstOverSession events in MongoDB or fallback.
+ */
+async function getFirstOverRuns(matchId, innings, currentScore) {
+  if (currentScore.balls === 6) {
+    return currentScore.runs;
+  }
+
+  if (dbConnected) {
+    try {
+      const session = await FirstOverSession.findOne({ matchId, innings });
+      if (session && session.events && session.events.length > 0) {
+        // Find the event closest to 6 balls (i.e. <= 6 balls)
+        const relevantEvents = session.events
+          .filter(e => e.balls <= 6)
+          .sort((a, b) => b.balls - a.balls); // descending order of balls
+
+        if (relevantEvents.length > 0) {
+          logger.info(`🔍 [DB] Found first over runs from event history: ${relevantEvents[0].runs} runs at ball ${relevantEvents[0].balls}`);
+          return relevantEvents[0].runs;
+        }
+      }
+    } catch (err) {
+      logger.error('💾 [DB ERROR] Failed to fetch first over runs from session:', err);
+    }
+  }
+
+  // Fallback: if we don't have events or DB is not connected, use current score runs
+  return currentScore.runs;
+}
+
+/**
+ * Check if the Over Runs Trick has already been evaluated for this match and innings.
+ */
+async function checkOverRunsTrickEvaluated(matchId, innings) {
+  if (dbConnected) {
+    try {
+      const existing = await OverRunsTrick.findOne({ matchId, innings });
+      return !!existing;
+    } catch (err) {
+      logger.error('💾 [DB ERROR] Failed to check OverRunsTrick:', err);
+      return false;
+    }
+  } else {
+    return overRunsTrickFallbackMap.has(`${matchId}_${innings}`);
+  }
+}
+
+/**
+ * Save the evaluation details of the Over Runs Trick.
+ */
+async function saveOverRunsTrickEvaluation({ matchId, innings, battingTeam, runsAtFirstOver, ballsAtEvaluation, notified, status }) {
+  const data = {
+    matchId,
+    innings,
+    battingTeam,
+    runsAtFirstOver,
+    ballsAtEvaluation,
+    notified,
+    status
+  };
+
+  if (dbConnected) {
+    try {
+      await OverRunsTrick.findOneAndUpdate(
+        { matchId, innings },
+        { $set: data },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      logger.info(`💾 [DB] Evaluated OverRunsTrick for match ${matchId} Innings ${innings} (Runs: ${runsAtFirstOver}, Status: ${status})`);
+    } catch (err) {
+      logger.error('💾 [DB ERROR] Failed to save OverRunsTrick:', err);
+    }
+  } else {
+    overRunsTrickFallbackMap.set(`${matchId}_${innings}`, data);
+    logger.info(`💾 [InMemory] Evaluated OverRunsTrick for match ${matchId} Innings ${innings} (Runs: ${runsAtFirstOver}, Status: ${status})`);
+  }
+}
+
 function isDbConnected() {
   return dbConnected;
 }
@@ -398,5 +494,8 @@ module.exports = {
   createWicketTrick,
   getActiveWicketTrick,
   resolveWicketTrick,
-  sweepOrphanedTricks
+  sweepOrphanedTricks,
+  getFirstOverRuns,
+  checkOverRunsTrickEvaluated,
+  saveOverRunsTrickEvaluation
 };
