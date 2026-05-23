@@ -12,8 +12,17 @@ require('dotenv').config();
 const { fetchLiveMatches }                        = require('./poller');
 const { isLiveMatch, matchLabel }                 = require('./matchFilter');
 const { parseScore, getCurrentInningsScore }      = require('./scoreParser');
-const { initDB, checkForWicket, getMatchState, saveFirstOverSessionEvent }  = require('./stateManager');
-const { initTelegram, sendTelegramAlert, sendTestScoreSummary } = require('./notifier');
+const {
+  initDB,
+  checkForWicket,
+  getMatchState,
+  saveFirstOverSessionEvent,
+  createWicketTrick,
+  getActiveWicketTrick,
+  resolveWicketTrick,
+  sweepOrphanedTricks
+} = require('./stateManager');
+const { initTelegram, sendTelegramAlert, sendTelegramReply, sendTestScoreSummary } = require('./notifier');
 const { initTwilio, triggerVoiceAlert }           = require('./twilioNotifier');
 const { initTeamResolver, resolveTeamName }        = require('./teamResolver');
 const logger                                      = require('./logger');
@@ -74,6 +83,66 @@ function formatScore(match) {
   return `${parts[0]}  vs  ${parts[1]}`;
 }
 
+const processingTricks = new Set();
+
+/**
+ * Checks and handles the Wicket Trick logic for active sessions.
+ */
+async function handleWicketTrickCheck(matchId, score, match) {
+  const activeTrick = await getActiveWicketTrick(matchId, score.innings);
+  if (!activeTrick) return;
+
+  const trickKey = `${matchId}_${score.innings}`;
+  if (processingTricks.has(trickKey)) return;
+
+  const currentWickets = score.wickets;
+  const initialWickets = activeTrick.initialWickets;
+  const currentBalls = score.balls;
+
+  // A match is finished if d === 2 (recently finished) or if it has a result and d !== 1
+  const isFinished = match.d === 2 || (match.res && match.d !== 1);
+
+  if (currentWickets > initialWickets) {
+    if (currentBalls <= 24) {
+      // Success! Another wicket fell within the first 4 overs (<= 24 balls)
+      processingTricks.add(trickKey);
+      logger.success(`🎯 [TRICK SUCCESS] Match ${matchId} innings ${score.innings} — Wickets went from ${initialWickets} to ${currentWickets} in ${score.overs} ov.`);
+      try {
+        await sendTelegramReply(activeTrick.telegramMessageId, 'Done ✅');
+        await resolveWicketTrick(matchId, score.innings, 'DONE');
+      } catch (err) {
+        logger.error(`❌ Failed to resolve Wicket Trick (Success) for match ${matchId}:`, err);
+      } finally {
+        processingTricks.delete(trickKey);
+      }
+    } else {
+      // Failure: Wickets increased but after the 4 overs limit
+      processingTricks.add(trickKey);
+      logger.info(`🚨 [TRICK FAIL] Match ${matchId} innings ${score.innings} — Another wicket fell at ${score.overs} ov (after 4 overs limit).`);
+      try {
+        await sendTelegramReply(activeTrick.telegramMessageId, 'Fail ❌');
+        await resolveWicketTrick(matchId, score.innings, 'FAIL');
+      } catch (err) {
+        logger.error(`❌ Failed to resolve Wicket Trick (Fail) for match ${matchId}:`, err);
+      } finally {
+        processingTricks.delete(trickKey);
+      }
+    }
+  } else if (currentBalls >= 24 || isFinished) {
+    // Failure: 4 overs completed (or match finished) with no other wickets
+    processingTricks.add(trickKey);
+    logger.info(`🚨 [TRICK FAIL] Match ${matchId} innings ${score.innings} — 4 overs completed (or match finished) at ${score.overs} ov with no other wicket.`);
+    try {
+      await sendTelegramReply(activeTrick.telegramMessageId, 'Fail ❌');
+      await resolveWicketTrick(matchId, score.innings, 'FAIL');
+    } catch (err) {
+      logger.error(`❌ Failed to resolve Wicket Trick (Fail) for match ${matchId}:`, err);
+    } finally {
+      processingTricks.delete(trickKey);
+    }
+  }
+}
+
 // ── Single poll tick ────────────────────────────────────
 async function tick() {
   pollCount++;
@@ -106,6 +175,11 @@ async function tick() {
 
     const score = getCurrentInningsScore(match);
     if (!score) continue;            // innings not started
+
+    // Process Wicket Trick state checks (non-blocking)
+    handleWicketTrickCheck(id, score, match).catch((err) => {
+      logger.error(`Error in handleWicketTrickCheck for match ${id}:`, err);
+    });
 
     // Live Tracking Log for first over
     if (score.isFirstOver) {
@@ -148,7 +222,7 @@ async function tick() {
     }).catch(() => {});
 
     try {
-      await sendTelegramAlert({
+      const telegramMessageId = await sendTelegramAlert({
         matchLabel:  label,
         matchId:     id,
         prevWickets: result.prevWickets,
@@ -158,7 +232,20 @@ async function tick() {
         battingTeam: battingTeam,
         innings:     score.innings
       });
-      logger.success(`Telegram alert sent successfully for ${label}`);
+      logger.success(`Telegram alert sent successfully for ${label} (Msg ID: ${telegramMessageId})`);
+
+      if (telegramMessageId) {
+        // Create Wicket Trick session to track subsequent wickets
+        createWicketTrick({
+          matchId: id,
+          innings: score.innings,
+          battingTeam,
+          telegramMessageId,
+          initialWickets: score.wickets
+        }).catch((err) => {
+          logger.error(`Failed to create Wicket Trick session for ${label}:`, err);
+        });
+      }
 
       // Save alert success to history asynchronously (non-blocking)!
       saveFirstOverSessionEvent({
@@ -237,6 +324,13 @@ async function tick() {
     logger.info(
       `Poll #${pollCount} — ${matchIds.length} total matches, ${liveT20Count} live tracked matches, ${liveMatches.length} with scores`
     );
+  }
+
+  // Every 150 polls (approx 5 minutes at 2s interval), run a sweep of orphaned tricks
+  if (pollCount % 150 === 0) {
+    sweepOrphanedTricks(matchIds, sendTelegramReply).catch((err) => {
+      logger.error('Error during orphaned tricks sweep:', err);
+    });
   }
 }
 

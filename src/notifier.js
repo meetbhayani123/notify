@@ -13,16 +13,20 @@ async function initTelegram() {
 }
 
 /**
- * Send a generic message to Telegram.
+ * Send a generic message to Telegram, optionally as a reply.
  */
-async function sendMessage(text) {
+async function sendMessage(text, replyToMessageId = null) {
   const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
   try {
-    const response = await axios.post(url, {
+    const body = {
       chat_id: process.env.TELEGRAM_CHAT_ID,
       text: text,
       parse_mode: 'Markdown'
-    });
+    };
+    if (replyToMessageId) {
+      body.reply_to_message_id = replyToMessageId;
+    }
+    const response = await axios.post(url, body);
     return response.data;
   } catch (err) {
     console.error('❌ Telegram send failed:', err.response?.data?.description || err.message);
@@ -49,7 +53,16 @@ async function sendTelegramAlert({ matchLabel, matchId, prevWickets, newWickets,
 
 _Powered by crex.com live data_`;
 
-  await sendMessage(message);
+  const data = await sendMessage(message);
+  return data?.result?.message_id || null;
+}
+
+/**
+ * Send a reply to an existing Telegram message.
+ */
+async function sendTelegramReply(replyToMessageId, text) {
+  const data = await sendMessage(text, replyToMessageId);
+  return data?.result?.message_id || null;
 }
 
 /**
@@ -70,4 +83,4 @@ async function sendTestScoreSummary(liveMatches) {
   await sendMessage(message);
 }
 
-module.exports = { initTelegram, sendTelegramAlert, sendTestScoreSummary };
+module.exports = { initTelegram, sendTelegramAlert, sendTelegramReply, sendTestScoreSummary };

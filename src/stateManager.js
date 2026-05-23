@@ -57,12 +57,29 @@ const systemLogSchema = new mongoose.Schema({
 
 const SystemLog = mongoose.model('SystemLog', systemLogSchema);
 
+// Define the MongoDB Schema for the 1st Over Wicket Trick
+const wicketTrickSchema = new mongoose.Schema({
+  matchId: { type: String, required: true },
+  innings: { type: Number, required: true },
+  battingTeam: { type: String, required: true },
+  telegramMessageId: { type: Number, required: true },
+  initialWickets: { type: Number, required: true },
+  status: { type: String, enum: ['PENDING', 'DONE', 'FAIL'], default: 'PENDING' },
+  resolved: { type: Boolean, default: false },
+  completedAt: { type: Date, default: null }
+}, { timestamps: true });
+
+wicketTrickSchema.index({ matchId: 1, innings: 1 }, { unique: true });
+
+const WicketTrick = mongoose.model('WicketTrick', wicketTrickSchema);
+
 /**
  * Connect to MongoDB using the MONGODB_URI env variable.
  * Fallback to in-memory map if no URI is provided.
  */
 let dbConnected = false;
 const fallbackMap = new Map();
+const wicketTrickFallbackMap = new Map();
 
 async function initDB() {
   if (process.env.MONGODB_URI) {
@@ -237,6 +254,136 @@ async function saveFirstOverSessionEvent({
   }
 }
 
+/**
+ * Create a new Wicket Trick session in MongoDB or the fallback map.
+ */
+async function createWicketTrick({ matchId, innings, battingTeam, telegramMessageId, initialWickets }) {
+  const data = {
+    matchId,
+    innings,
+    battingTeam,
+    telegramMessageId,
+    initialWickets,
+    status: 'PENDING',
+    resolved: false
+  };
+
+  if (dbConnected) {
+    try {
+      await WicketTrick.findOneAndUpdate(
+        { matchId, innings },
+        { $set: data },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      logger.info(`💾 [DB] Created WicketTrick for match ${matchId} Innings ${innings}`);
+    } catch (err) {
+      logger.error(`💾 [DB ERROR] Failed to create WicketTrick:`, err);
+    }
+  } else {
+    wicketTrickFallbackMap.set(`${matchId}_${innings}`, data);
+    logger.info(`💾 [InMemory] Created WicketTrick for match ${matchId} Innings ${innings}`);
+  }
+}
+
+/**
+ * Fetch an unresolved Wicket Trick session.
+ */
+async function getActiveWicketTrick(matchId, innings) {
+  if (dbConnected) {
+    try {
+      return await WicketTrick.findOne({ matchId, innings, resolved: false });
+    } catch (err) {
+      logger.error(`💾 [DB ERROR] Failed to get active WicketTrick:`, err);
+      return null;
+    }
+  } else {
+    const trick = wicketTrickFallbackMap.get(`${matchId}_${innings}`);
+    if (trick && !trick.resolved) {
+      return trick;
+    }
+    return null;
+  }
+}
+
+/**
+ * Resolve a Wicket Trick session with DONE or FAIL.
+ */
+async function resolveWicketTrick(matchId, innings, status) {
+  const update = {
+    status,
+    resolved: true,
+    completedAt: new Date()
+  };
+
+  if (dbConnected) {
+    try {
+      await WicketTrick.updateOne({ matchId, innings }, { $set: update });
+      logger.info(`💾 [DB] Resolved WicketTrick for match ${matchId} Innings ${innings} as ${status}`);
+    } catch (err) {
+      logger.error(`💾 [DB ERROR] Failed to resolve WicketTrick:`, err);
+    }
+  } else {
+    const key = `${matchId}_${innings}`;
+    const existing = wicketTrickFallbackMap.get(key);
+    if (existing) {
+      existing.status = status;
+      existing.resolved = true;
+      existing.completedAt = new Date();
+      wicketTrickFallbackMap.set(key, existing);
+      logger.info(`💾 [InMemory] Resolved WicketTrick for match ${matchId} Innings ${innings} as ${status}`);
+    }
+  }
+}
+
+/**
+ * Sweep and resolve orphaned pending tricks.
+ */
+async function sweepOrphanedTricks(activeMatchIds, sendTelegramReplyFn) {
+  if (!dbConnected) {
+    // Also cleanup in-memory tricks for inactive matches
+    for (const [key, trick] of wicketTrickFallbackMap.entries()) {
+      if (!trick.resolved && !activeMatchIds.includes(trick.matchId)) {
+        logger.info(`🧹 [InMemory SWEEP] Found orphaned pending trick for match ${trick.matchId} (innings ${trick.innings}). Marking as FAIL.`);
+        try {
+          if (sendTelegramReplyFn) {
+            await sendTelegramReplyFn(trick.telegramMessageId, 'Fail ❌');
+          }
+        } catch (err) {
+          logger.error(`[SWEEP ERROR] Failed to reply to orphaned trick:`, err);
+        }
+        trick.status = 'FAIL';
+        trick.resolved = true;
+        trick.completedAt = new Date();
+        wicketTrickFallbackMap.set(key, trick);
+      }
+    }
+    return;
+  }
+
+  try {
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    const orphanedTricks = await WicketTrick.find({
+      resolved: false,
+      matchId: { $nin: activeMatchIds },
+      createdAt: { $lt: tenMinutesAgo }
+    });
+
+    for (const trick of orphanedTricks) {
+      logger.info(`🧹 [DB SWEEP] Found orphaned pending trick for match ${trick.matchId} (innings ${trick.innings}). Marking as FAIL.`);
+      try {
+        if (sendTelegramReplyFn) {
+          await sendTelegramReplyFn(trick.telegramMessageId, 'Fail ❌');
+        }
+      } catch (err) {
+        logger.error(`[SWEEP ERROR] Failed to send Telegram reply during sweep for match ${trick.matchId}:`, err);
+      }
+      await resolveWicketTrick(trick.matchId, trick.innings, 'FAIL');
+    }
+  } catch (err) {
+    logger.error('💾 [DB ERROR] Failed during orphaned tricks sweep:', err);
+  }
+}
+
 function isDbConnected() {
   return dbConnected;
 }
@@ -247,5 +394,9 @@ module.exports = {
   getMatchState,
   saveSystemLog,
   saveFirstOverSessionEvent,
-  isDbConnected
+  isDbConnected,
+  createWicketTrick,
+  getActiveWicketTrick,
+  resolveWicketTrick,
+  sweepOrphanedTricks
 };
