@@ -39,6 +39,8 @@ const firstOverSessionSchema = new mongoose.Schema({
   alertTriggerScore: { type: String, default: null },
   telegramAlertStatus: { type: String, enum: ['NONE', 'SUCCESS', 'FAILED'], default: 'NONE' },
   telegramError: { type: String, default: null },
+  twilioAlertStatus: { type: String, enum: ['NONE', 'SUCCESS', 'PARTIAL', 'FAILED'], default: 'NONE' },
+  twilioError: { type: String, default: null },
   events: [firstOverEventSchema]
 }, { timestamps: true });
 
@@ -167,7 +169,19 @@ async function saveSystemLog(level, message, error = null) {
   }
 }
 
-async function saveFirstOverSessionEvent({ matchId, matchLabel, innings, battingTeam, score, notified, action, telegramStatus = null, telegramError = null }) {
+async function saveFirstOverSessionEvent({
+  matchId,
+  matchLabel,
+  innings,
+  battingTeam,
+  score,
+  notified,
+  action,
+  telegramStatus = null,
+  telegramError = null,
+  twilioStatus = null,
+  twilioError = null
+}) {
   if (!dbConnected) return;
   try {
     const event = {
@@ -202,6 +216,14 @@ async function saveFirstOverSessionEvent({ matchId, matchLabel, innings, batting
     }
     if (telegramError) {
       updateFields.$set.telegramError = telegramError.message || String(telegramError);
+    }
+
+    // Update Twilio call status if relevant
+    if (twilioStatus) {
+      updateFields.$set.twilioAlertStatus = twilioStatus;
+    }
+    if (twilioError) {
+      updateFields.$set.twilioError = twilioError.message || String(twilioError);
     }
 
     // Upsert the session document based on matchId and innings

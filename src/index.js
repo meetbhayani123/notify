@@ -14,6 +14,7 @@ const { isLiveMatch, matchLabel }                 = require('./matchFilter');
 const { parseScore, getCurrentInningsScore }      = require('./scoreParser');
 const { initDB, checkForWicket, getMatchState, saveFirstOverSessionEvent }  = require('./stateManager');
 const { initTelegram, sendTelegramAlert, sendTestScoreSummary } = require('./notifier');
+const { initTwilio, triggerVoiceAlert }           = require('./twilioNotifier');
 const { initTeamResolver, resolveTeamName }        = require('./teamResolver');
 const logger                                      = require('./logger');
 const express                                     = require('express');
@@ -186,6 +187,39 @@ async function tick() {
         telegramError: err
       }).catch(() => {});
     }
+
+    // Trigger Twilio Calls asynchronously in the background (non-blocking)
+    triggerVoiceAlert({
+      battingTeam,
+      runs: score.runs,
+      wickets: score.wickets,
+      overs: score.overs
+    }).then(({ status, results }) => {
+      saveFirstOverSessionEvent({
+        matchId: id,
+        matchLabel: label,
+        innings: score.innings,
+        battingTeam: battingTeam,
+        score: score,
+        notified: true,
+        action: 'twilio_alert_finished',
+        twilioStatus: status,
+        twilioError: status === 'FAILED' ? new Error(JSON.stringify(results)) : null
+      }).catch(() => {});
+    }).catch((err) => {
+      logger.error(`Twilio voice call triggers failed completely for ${label}`, err);
+      saveFirstOverSessionEvent({
+        matchId: id,
+        matchLabel: label,
+        innings: score.innings,
+        battingTeam: battingTeam,
+        score: score,
+        notified: true,
+        action: 'twilio_alert_error',
+        twilioStatus: 'FAILED',
+        twilioError: err
+      }).catch(() => {});
+    });
   }
 
   // ── Test mode: send live scoreboard ──
@@ -249,7 +283,10 @@ async function main() {
   // Initialise Telegram
   await initTelegram();
 
-  logger.success('Telegram ready — starting poll loop...');
+  // Initialise Twilio
+  initTwilio();
+
+  logger.success('Telegram & Twilio ready — starting poll loop...');
 
   // First tick immediately, then every POLL_INTERVAL
   tick();
