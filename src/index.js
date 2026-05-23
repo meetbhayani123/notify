@@ -108,8 +108,11 @@ async function handleWicketTrickCheck(matchId, score, match) {
   const initialWickets = activeTrick.initialWickets;
   const currentBalls = score.balls;
 
-  // A match is finished if d === 2 (recently finished) or if it has a result and d !== 1
-  const isFinished = match.d === 2 || (match.res && match.d !== 1);
+  // A match is finished if d === 2 or there's a result, but we must exclude "Innings Break"
+  // which the API uses during the transition to/during the 2nd innings.
+  const resStr = (match.res && typeof match.res === 'string') ? match.res.trim() : '';
+  const isFinished = (match.d === 2 && resStr !== '' && !resStr.toLowerCase().includes('innings break')) ||
+                     (resStr !== '' && !resStr.toLowerCase().includes('innings break') && match.d !== 1);
 
   if (currentWickets > initialWickets) {
     if (currentBalls <= 24) {
@@ -117,7 +120,8 @@ async function handleWicketTrickCheck(matchId, score, match) {
       processingTricks.add(trickKey);
       logger.success(`🎯 [TRICK SUCCESS] Match ${matchId} innings ${score.innings} — Wickets went from ${initialWickets} to ${currentWickets} in ${score.overs} ov.`);
       try {
-        await sendTelegramReply(activeTrick.telegramMessageId, 'Done ✅');
+        const msg = `Done ✅\n*${activeTrick.battingTeam}*: ${score.runs}/${score.wickets} (${score.overs} ov)`;
+        await sendTelegramReply(activeTrick.telegramMessageId, msg);
         await resolveWicketTrick(matchId, score.innings, 'DONE');
       } catch (err) {
         logger.error(`❌ Failed to resolve Wicket Trick (Success) for match ${matchId}:`, err);
@@ -129,7 +133,8 @@ async function handleWicketTrickCheck(matchId, score, match) {
       processingTricks.add(trickKey);
       logger.info(`🚨 [TRICK FAIL] Match ${matchId} innings ${score.innings} — Another wicket fell at ${score.overs} ov (after 4 overs limit).`);
       try {
-        await sendTelegramReply(activeTrick.telegramMessageId, 'Fail ❌');
+        const msg = `Fail ❌ (Wicket fell after 4 overs)\n*${activeTrick.battingTeam}*: ${score.runs}/${score.wickets} (${score.overs} ov)`;
+        await sendTelegramReply(activeTrick.telegramMessageId, msg);
         await resolveWicketTrick(matchId, score.innings, 'FAIL');
       } catch (err) {
         logger.error(`❌ Failed to resolve Wicket Trick (Fail) for match ${matchId}:`, err);
@@ -142,7 +147,9 @@ async function handleWicketTrickCheck(matchId, score, match) {
     processingTricks.add(trickKey);
     logger.info(`🚨 [TRICK FAIL] Match ${matchId} innings ${score.innings} — 4 overs completed (or match finished) at ${score.overs} ov with no other wicket.`);
     try {
-      await sendTelegramReply(activeTrick.telegramMessageId, 'Fail ❌');
+      const reason = isFinished ? 'Match finished' : '4 overs completed';
+      const msg = `Fail ❌ (${reason})\n*${activeTrick.battingTeam}*: ${score.runs}/${score.wickets} (${score.overs} ov)`;
+      await sendTelegramReply(activeTrick.telegramMessageId, msg);
       await resolveWicketTrick(matchId, score.innings, 'FAIL');
     } catch (err) {
       logger.error(`❌ Failed to resolve Wicket Trick (Fail) for match ${matchId}:`, err);
