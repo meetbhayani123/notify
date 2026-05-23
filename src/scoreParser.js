@@ -38,11 +38,10 @@ function parseScore(raw) {
   const overs   = parseFloat(m[3]);
   const balls   = parseOversToTotalBalls(overs);
 
-  // "First over" means balls 1-5 (overs 0.1 through 0.5).
-  // At 0.6 the 6th ball has been bowled — the over is complete.
-  // At 1.0+ we're into the 2nd over or beyond.
-  const balls6 = parseOversToTotalBalls(overs);
-  const isFirstOver = balls6 >= 1 && balls6 <= 5;
+  // "First over" means balls 1-6 (overs 0.1 through 1.0 or 0.6).
+  // At 1.0 (or 0.6) the 6th ball has been bowled — the first over is complete.
+  // At 1.1+ we're into the 2nd over or beyond.
+  const isFirstOver = balls >= 1 && balls <= 6;
 
   return { runs, wickets, overs, balls, isFirstOver };
 }
@@ -57,8 +56,22 @@ function parseScore(raw) {
  */
 function getCurrentInningsScore(match) {
   const second = parseScore(match.k);
-  if (second) return second;
-  return parseScore(match.j);
+  if (second) {
+    return {
+      ...second,
+      innings: 2,
+      battingTeamKey: match.c
+    };
+  }
+  const first = parseScore(match.j);
+  if (first) {
+    return {
+      ...first,
+      innings: 1,
+      battingTeamKey: match.b
+    };
+  }
+  return null;
 }
 
 module.exports = { parseScore, getCurrentInningsScore, parseOversToTotalBalls };

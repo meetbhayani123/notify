@@ -12,9 +12,10 @@ require('dotenv').config();
 const { fetchLiveMatches }                        = require('./poller');
 const { isLiveMatch, matchLabel }                 = require('./matchFilter');
 const { parseScore, getCurrentInningsScore }      = require('./scoreParser');
-const { initDB, checkForWicket }                  = require('./stateManager');
+const { initDB, checkForWicket, getMatchState, saveFirstOverSessionEvent }  = require('./stateManager');
 const { initTelegram, sendTelegramAlert, sendTestScoreSummary } = require('./notifier');
-const { initTeamResolver }                        = require('./teamResolver');
+const { initTeamResolver, resolveTeamName }        = require('./teamResolver');
+const logger                                      = require('./logger');
 const express                                     = require('express');
 
 // ── Config ──────────────────────────────────────────────
@@ -104,15 +105,46 @@ async function tick() {
 
     const score = getCurrentInningsScore(match);
     if (!score) continue;            // innings not started
-    if (!score.isFirstOver) continue; // past the first over already
+
+    // Live Tracking Log for first over
+    if (score.isFirstOver) {
+      const label = await matchLabel(id, match);
+      const battingTeam = await resolveTeamName(score.battingTeamKey);
+      const dbState = await getMatchState(id);
+      const notifiedStr = (dbState && dbState.notified) ? '✅ Alert Sent' : '⏳ Waiting for Wicket';
+      logger.live(`${label} — Batting: ${battingTeam} (${score.innings === 1 ? '1st' : '2nd'} Innings) — ${score.runs}/${score.wickets} (${score.overs} ov) — [${notifiedStr}]`);
+
+      // Save to MongoDB asynchronously (non-blocking)!
+      saveFirstOverSessionEvent({
+        matchId: id,
+        matchLabel: label,
+        innings: score.innings,
+        battingTeam: battingTeam,
+        score: score,
+        notified: !!(dbState && dbState.notified),
+        action: 'poll_received'
+      }).catch(() => {});
+    }
 
     const result = await checkForWicket(id, score);
     if (!result.wicketFell) continue;
 
     const label = await matchLabel(id, match);
-    console.log(
-      `\n🚨 WICKET in 1st over! ${label} — ${score.runs}/${score.wickets} (${score.overs} ov)`
+    const battingTeam = await resolveTeamName(score.battingTeamKey);
+    logger.success(
+      `WICKET in 1st over! ${label} — Batting: ${battingTeam} (${score.innings === 1 ? '1st' : '2nd'} Innings) — ${score.runs}/${score.wickets} (${score.overs} ov)`
     );
+
+    // Save alert trigger to history asynchronously (non-blocking)!
+    saveFirstOverSessionEvent({
+      matchId: id,
+      matchLabel: label,
+      innings: score.innings,
+      battingTeam: battingTeam,
+      score: score,
+      notified: true,
+      action: 'alert_triggered'
+    }).catch(() => {});
 
     try {
       await sendTelegramAlert({
@@ -121,10 +153,38 @@ async function tick() {
         prevWickets: result.prevWickets,
         newWickets:  result.newWickets,
         overs:       score.overs,
-        runs:        score.runs
+        runs:        score.runs,
+        battingTeam: battingTeam,
+        innings:     score.innings
       });
+      logger.success(`Telegram alert sent successfully for ${label}`);
+
+      // Save alert success to history asynchronously (non-blocking)!
+      saveFirstOverSessionEvent({
+        matchId: id,
+        matchLabel: label,
+        innings: score.innings,
+        battingTeam: battingTeam,
+        score: score,
+        notified: true,
+        action: 'alert_success',
+        telegramStatus: 'SUCCESS'
+      }).catch(() => {});
     } catch (err) {
-      console.error('❌ Telegram send failed:', err.message);
+      logger.error(`Telegram send failed for ${label}`, err);
+
+      // Save alert failure to history asynchronously (non-blocking)!
+      saveFirstOverSessionEvent({
+        matchId: id,
+        matchLabel: label,
+        innings: score.innings,
+        battingTeam: battingTeam,
+        score: score,
+        notified: true,
+        action: 'alert_failed',
+        telegramStatus: 'FAILED',
+        telegramError: err
+      }).catch(() => {});
     }
   }
 
@@ -132,15 +192,16 @@ async function tick() {
   if (TEST_MODE && liveMatches.length > 0 && (pollCount === 1 || pollCount % TEST_SEND_EVERY === 0)) {
     try {
       await sendTestScoreSummary(liveMatches);
+      logger.success('Test live scoreboard sent successfully to Telegram');
     } catch (err) {
-      console.error('❌ [TEST] Telegram send failed:', err.message);
+      logger.error('Test scoreboard Telegram send failed', err);
     }
   }
 
   // Summary log every 10 polls
   if (pollCount % 10 === 1) {
-    console.log(
-      `[${ist()}] Poll #${pollCount} — ${matchIds.length} total matches, ${liveT20Count} live tracked matches, ${liveMatches.length} with scores`
+    logger.info(
+      `Poll #${pollCount} — ${matchIds.length} total matches, ${liveT20Count} live tracked matches, ${liveMatches.length} with scores`
     );
   }
 }
@@ -150,14 +211,13 @@ async function main() {
   validateEnv();
 
   const mode = TEST_MODE ? '🧪 TEST MODE' : '🏏 PRODUCTION';
-  console.log(`${mode} — Cricket Wicket Alert System starting...`);
-  console.log(`   Polling every ${POLL_INTERVAL / 1000}s`);
+  logger.info(`${mode} — Cricket Wicket Alert System starting...`);
+  logger.info(`Polling every ${POLL_INTERVAL / 1000}s`);
   if (TEST_MODE) {
-    console.log(`   📢 Sending live scoreboard to group every ${TEST_SEND_EVERY * POLL_INTERVAL / 1000}s`);
+    logger.info(`Sending live scoreboard to group every ${TEST_SEND_EVERY * POLL_INTERVAL / 1000}s`);
   }
-  console.log('   Watching: ALL live matches, first over wickets only');
-  console.log(`   Alert to chat: "${process.env.TELEGRAM_CHAT_ID}"`);
-  console.log('');
+  logger.info('Watching: ALL live matches, first over wickets only');
+  logger.info(`Alert to chat: "${process.env.TELEGRAM_CHAT_ID}"`);
 
   // Initialise MongoDB
   await initDB();
@@ -183,13 +243,13 @@ async function main() {
   });
 
   app.listen(port, () => {
-    console.log(`🌐 Health check server listening on port ${port}`);
+    logger.info(`🌐 Health check server listening on port ${port}`);
   });
 
   // Initialise Telegram
   await initTelegram();
 
-  console.log('\n🟢 Telegram ready — starting poll loop...\n');
+  logger.success('Telegram ready — starting poll loop...');
 
   // First tick immediately, then every POLL_INTERVAL
   tick();
@@ -197,6 +257,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('💀 Fatal error:', err.message);
+  logger.error('Fatal error occurred during bootstrap', err);
   process.exit(1);
 });

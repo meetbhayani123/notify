@@ -33,14 +33,19 @@ async function sendMessage(text) {
 /**
  * Send the production first-over wicket alert.
  */
-async function sendTelegramAlert({ matchLabel, matchId, prevWickets, newWickets, overs, runs }) {
+async function sendTelegramAlert({ matchLabel, matchId, prevWickets, newWickets, overs, runs, battingTeam, innings }) {
   const time = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
   const message = `🚨 *WICKET ALERT — First Over!*
 
-🏏 Match : ${matchLabel}
-📊 Score : ${runs}/${newWickets} (${overs} ov)
-⚡ Event : Wicket fell in the 1st over
-🕐 Time  : ${time}
+🏏 Match   : ${matchLabel}
+🏏 Batting : *${battingTeam}* (${innings === 1 ? '1st' : '2nd'} Innings)
+📊 Score   : *${runs}/${newWickets}* (${overs} ov)
+⚡ Event   : Wicket fell in the 1st over
+🕐 Time    : ${time}
+
+🔗 *Quick Links:*
+• CBTF: https://cbtffreehit.com/sport/in-play
+• USDT: https://usdtplayer.com/sport/4
 
 _Powered by crex.com live data_`;
 
