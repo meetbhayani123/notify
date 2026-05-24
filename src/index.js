@@ -38,10 +38,13 @@ const logger                                      = require('./logger');
 const express                                     = require('express');
 
 // ── Config ──────────────────────────────────────────────
-const POLL_INTERVAL = Math.max(
+const BASE_INTERVAL = Math.max(
   parseInt(process.env.POLL_INTERVAL_MS, 10) || 2000,
   1000
 );
+const MAX_INTERVAL = 30000; // Max wait: 30 seconds during API downtime
+let currentInterval = BASE_INTERVAL;
+
 const TEST_MODE = process.env.TEST_MODE === 'true';
 
 // Configurable delay for Twilio Voice Alert calls (in milliseconds)
@@ -260,203 +263,224 @@ async function handleOverRunsTrickCheck(matchId, score, match) {
 // ── Single poll tick ────────────────────────────────────
 async function tick() {
   pollCount++;
-  const data = await fetchLiveMatches();
-  if (!data) return;
 
-  const matchIds    = Object.keys(data);
-  let liveT20Count  = 0;
-  const liveMatches = [];  // for test mode
-
-  for (const id of matchIds) {
-    const match = data[id];
-
-    // ── Test mode: collect live matches with actual scores ──
-    const isLive = isLiveMatch(match);
-    if (TEST_MODE && isLive && (match.j || match.k)) {
-      const label = await matchLabel(id, match);
-      const score = getCurrentInningsScore(match);
-      liveMatches.push({
-        label,
-        score: formatScore(match),
-        status: match.res || (score ? `${score.overs} ov bowled` : ''),
-        currentScore: score
-      });
+  try {
+    const data = await fetchLiveMatches();
+    if (!data) {
+      // API failed or returned null (timeout/offline) -> increase wait time (exponential backoff)
+      currentInterval = Math.min(currentInterval * 2, MAX_INTERVAL);
+      logger.warn(`⚠️ [Poll #${pollCount}] API is down or empty response. Backing off to ${currentInterval / 1000}s`);
+      return;
     }
 
-    // ── Production: process all live matches ───────────────────
-    if (!isLive) continue;
-    liveT20Count++;
-
-    const score = getCurrentInningsScore(match);
-    if (!score) continue;            // innings not started
-
-    // Process Wicket Trick state checks (non-blocking)
-    handleWicketTrickCheck(id, score, match).catch((err) => {
-      logger.error(`Error in handleWicketTrickCheck for match ${id}:`, err);
-    });
-
-    // Process Over Runs Trick state checks (non-blocking)
-    handleOverRunsTrickCheck(id, score, match).catch((err) => {
-      logger.error(`Error in handleOverRunsTrickCheck for match ${id}:`, err);
-    });
-
-    // Live Tracking Log for first over
-    if (score.isFirstOver) {
-      const label = await matchLabel(id, match);
-      const battingTeam = await resolveTeamName(score.battingTeamKey);
-      const dbState = await getMatchState(id);
-      const notifiedStr = (dbState && dbState.notified) ? '✅ Alert Sent' : '⏳ Waiting for Wicket';
-      logger.live(`${label} — Batting: ${battingTeam} (${score.innings === 1 ? '1st' : '2nd'} Innings) — ${score.runs}/${score.wickets} (${score.overs} ov) — [${notifiedStr}]`);
-
-      // Save to MongoDB asynchronously (non-blocking)!
-      saveFirstOverSessionEvent({
-        matchId: id,
-        matchLabel: label,
-        innings: score.innings,
-        battingTeam: battingTeam,
-        score: score,
-        notified: !!(dbState && dbState.notified),
-        action: 'poll_received'
-      }).catch(() => {});
+    // API recovered or succeeded -> reset back to base interval
+    if (currentInterval !== BASE_INTERVAL) {
+      logger.success(`✅ API recovered! Resetting polling interval to ${BASE_INTERVAL / 1000}s`);
     }
+    currentInterval = BASE_INTERVAL;
 
-    const result = await checkForWicket(id, score);
-    if (!result.wicketFell) continue;
+    const matchIds    = Object.keys(data);
+    let liveT20Count  = 0;
+    const liveMatches = [];  // for test mode
 
-    const label = await matchLabel(id, match);
-    const battingTeam = await resolveTeamName(score.battingTeamKey);
-    logger.success(
-      `WICKET in 1st over! ${label} — Batting: ${battingTeam} (${score.innings === 1 ? '1st' : '2nd'} Innings) — ${score.runs}/${score.wickets} (${score.overs} ov)`
-    );
+    for (const id of matchIds) {
+      const match = data[id];
 
-    // Save alert trigger to history asynchronously (non-blocking)!
-    saveFirstOverSessionEvent({
-      matchId: id,
-      matchLabel: label,
-      innings: score.innings,
-      battingTeam: battingTeam,
-      score: score,
-      notified: true,
-      action: 'alert_triggered'
-    }).catch(() => {});
-
-    try {
-      const telegramMessageId = await sendTelegramAlert({
-        matchLabel:  label,
-        matchId:     id,
-        prevWickets: result.prevWickets,
-        newWickets:  result.newWickets,
-        overs:       score.overs,
-        runs:        score.runs,
-        battingTeam: battingTeam,
-        innings:     score.innings
-      });
-      logger.success(`Telegram alert sent successfully for ${label} (Msg ID: ${telegramMessageId})`);
-
-      if (telegramMessageId) {
-        // Create Wicket Trick session to track subsequent wickets
-        createWicketTrick({
-          matchId: id,
-          innings: score.innings,
-          battingTeam,
-          telegramMessageId,
-          initialWickets: score.wickets
-        }).catch((err) => {
-          logger.error(`Failed to create Wicket Trick session for ${label}:`, err);
+      // ── Test mode: collect live matches with actual scores ──
+      const isLive = isLiveMatch(match);
+      if (TEST_MODE && isLive && (match.j || match.k)) {
+        const label = await matchLabel(id, match);
+        const score = getCurrentInningsScore(match);
+        liveMatches.push({
+          label,
+          score: formatScore(match),
+          status: match.res || (score ? `${score.overs} ov bowled` : ''),
+          currentScore: score
         });
       }
 
-      // Save alert success to history asynchronously (non-blocking)!
-      saveFirstOverSessionEvent({
-        matchId: id,
-        matchLabel: label,
-        innings: score.innings,
-        battingTeam: battingTeam,
-        score: score,
-        notified: true,
-        action: 'alert_success',
-        telegramStatus: 'SUCCESS'
-      }).catch(() => {});
-    } catch (err) {
-      logger.error(`Telegram send failed for ${label}`, err);
+      // ── Production: process all live matches ───────────────────
+      if (!isLive) continue;
+      liveT20Count++;
 
-      // Save alert failure to history asynchronously (non-blocking)!
-      saveFirstOverSessionEvent({
-        matchId: id,
-        matchLabel: label,
-        innings: score.innings,
-        battingTeam: battingTeam,
-        score: score,
-        notified: true,
-        action: 'alert_failed',
-        telegramStatus: 'FAILED',
-        telegramError: err
-      }).catch(() => {});
-    }
+      const score = getCurrentInningsScore(match);
+      if (!score) continue;            // innings not started
 
-    // Trigger Twilio Calls asynchronously in the background (non-blocking) with a configured delay
-    // to ensure the Telegram notification is received and prioritized first.
-    (async () => {
-      if (TWILIO_CALL_DELAY_MS > 0) {
-        logger.info(`⏳ Waiting ${TWILIO_CALL_DELAY_MS / 1000}s before triggering Twilio call to prioritize Telegram...`);
-        await wait(TWILIO_CALL_DELAY_MS);
-      }
-      return triggerVoiceAlert({
-        battingTeam,
-        runs: score.runs,
-        wickets: score.wickets,
-        overs: score.overs
+      // Process Wicket Trick state checks (non-blocking)
+      handleWicketTrickCheck(id, score, match).catch((err) => {
+        logger.error(`Error in handleWicketTrickCheck for match ${id}:`, err);
       });
-    })().then(({ status, results }) => {
-      saveFirstOverSessionEvent({
-        matchId: id,
-        matchLabel: label,
-        innings: score.innings,
-        battingTeam: battingTeam,
-        score: score,
-        notified: true,
-        action: 'twilio_alert_finished',
-        twilioStatus: status,
-        twilioError: status === 'FAILED' ? new Error(JSON.stringify(results)) : null
-      }).catch(() => {});
-    }).catch((err) => {
-      logger.error(`Twilio voice call triggers failed completely for ${label}`, err);
-      saveFirstOverSessionEvent({
-        matchId: id,
-        matchLabel: label,
-        innings: score.innings,
-        battingTeam: battingTeam,
-        score: score,
-        notified: true,
-        action: 'twilio_alert_error',
-        twilioStatus: 'FAILED',
-        twilioError: err
-      }).catch(() => {});
-    });
-  }
 
-  // ── Test mode: send live scoreboard ──
-  if (TEST_MODE && liveMatches.length > 0 && (pollCount === 1 || pollCount % TEST_SEND_EVERY === 0)) {
-    try {
-      await sendTestScoreSummary(liveMatches);
-      logger.success('Test live scoreboard sent successfully to Telegram');
-    } catch (err) {
-      logger.error('Test scoreboard Telegram send failed', err);
+      // Process Over Runs Trick state checks (non-blocking)
+      handleOverRunsTrickCheck(id, score, match).catch((err) => {
+        logger.error(`Error in handleOverRunsTrickCheck for match ${id}:`, err);
+      });
+
+      // Live Tracking Log for first over
+      if (score.isFirstOver) {
+        const label = await matchLabel(id, match);
+        const battingTeam = await resolveTeamName(score.battingTeamKey);
+        const dbState = await getMatchState(id);
+        const notifiedStr = (dbState && dbState.notified) ? '✅ Alert Sent' : '⏳ Waiting for Wicket';
+        logger.live(`${label} — Batting: ${battingTeam} (${score.innings === 1 ? '1st' : '2nd'} Innings) — ${score.runs}/${score.wickets} (${score.overs} ov) — [${notifiedStr}]`);
+
+        // Save to MongoDB asynchronously (non-blocking)!
+        saveFirstOverSessionEvent({
+          matchId: id,
+          matchLabel: label,
+          innings: score.innings,
+          battingTeam: battingTeam,
+          score: score,
+          notified: !!(dbState && dbState.notified),
+          action: 'poll_received'
+        }).catch(() => {});
+      }
+
+      const result = await checkForWicket(id, score);
+      if (!result.wicketFell) continue;
+
+      const label = await matchLabel(id, match);
+      const battingTeam = await resolveTeamName(score.battingTeamKey);
+      logger.success(
+        `WICKET in 1st over! ${label} — Batting: ${battingTeam} (${score.innings === 1 ? '1st' : '2nd'} Innings) — ${score.runs}/${score.wickets} (${score.overs} ov)`
+      );
+
+      // Save alert trigger to history asynchronously (non-blocking)!
+      saveFirstOverSessionEvent({
+        matchId: id,
+        matchLabel: label,
+        innings: score.innings,
+        battingTeam: battingTeam,
+        score: score,
+        notified: true,
+        action: 'alert_triggered'
+      }).catch(() => {});
+
+      try {
+        const telegramMessageId = await sendTelegramAlert({
+          matchLabel:  label,
+          matchId:     id,
+          prevWickets: result.prevWickets,
+          newWickets:  result.newWickets,
+          overs:       score.overs,
+          runs:        score.runs,
+          battingTeam: battingTeam,
+          innings:     score.innings
+        });
+        logger.success(`Telegram alert sent successfully for ${label} (Msg ID: ${telegramMessageId})`);
+
+        if (telegramMessageId) {
+          // Create Wicket Trick session to track subsequent wickets
+          createWicketTrick({
+            matchId: id,
+            innings: score.innings,
+            battingTeam,
+            telegramMessageId,
+            initialWickets: score.wickets
+          }).catch((err) => {
+            logger.error(`Failed to create Wicket Trick session for ${label}:`, err);
+          });
+        }
+
+        // Save alert success to history asynchronously (non-blocking)!
+        saveFirstOverSessionEvent({
+          matchId: id,
+          matchLabel: label,
+          innings: score.innings,
+          battingTeam: battingTeam,
+          score: score,
+          notified: true,
+          action: 'alert_success',
+          telegramStatus: 'SUCCESS'
+        }).catch(() => {});
+      } catch (err) {
+        logger.error(`Telegram send failed for ${label}`, err);
+
+        // Save alert failure to history asynchronously (non-blocking)!
+        saveFirstOverSessionEvent({
+          matchId: id,
+          matchLabel: label,
+          innings: score.innings,
+          battingTeam: battingTeam,
+          score: score,
+          notified: true,
+          action: 'alert_failed',
+          telegramStatus: 'FAILED',
+          telegramError: err
+        }).catch(() => {});
+      }
+
+      // Trigger Twilio Calls asynchronously in the background (non-blocking) with a configured delay
+      // to ensure the Telegram notification is received and prioritized first.
+      (async () => {
+        if (TWILIO_CALL_DELAY_MS > 0) {
+          logger.info(`⏳ Waiting ${TWILIO_CALL_DELAY_MS / 1000}s before triggering Twilio call to prioritize Telegram...`);
+          await wait(TWILIO_CALL_DELAY_MS);
+        }
+        return triggerVoiceAlert({
+          battingTeam,
+          runs: score.runs,
+          wickets: score.wickets,
+          overs: score.overs
+        });
+      })().then(({ status, results }) => {
+        saveFirstOverSessionEvent({
+          matchId: id,
+          matchLabel: label,
+          innings: score.innings,
+          battingTeam: battingTeam,
+          score: score,
+          notified: true,
+          action: 'twilio_alert_finished',
+          twilioStatus: status,
+          twilioError: status === 'FAILED' ? new Error(JSON.stringify(results)) : null
+        }).catch(() => {});
+      }).catch((err) => {
+        logger.error(`Twilio voice call triggers failed completely for ${label}`, err);
+        saveFirstOverSessionEvent({
+          matchId: id,
+          matchLabel: label,
+          innings: score.innings,
+          battingTeam: battingTeam,
+          score: score,
+          notified: true,
+          action: 'twilio_alert_error',
+          twilioStatus: 'FAILED',
+          twilioError: err
+        }).catch(() => {});
+      });
     }
-  }
 
-  // Summary log every 10 polls
-  if (pollCount % 10 === 1) {
-    logger.info(
-      `Poll #${pollCount} — ${matchIds.length} total matches, ${liveT20Count} live tracked matches, ${liveMatches.length} with scores`
-    );
-  }
+    // ── Test mode: send live scoreboard ──
+    if (TEST_MODE && liveMatches.length > 0 && (pollCount === 1 || pollCount % TEST_SEND_EVERY === 0)) {
+      try {
+        await sendTestScoreSummary(liveMatches);
+        logger.success('Test live scoreboard sent successfully to Telegram');
+      } catch (err) {
+        logger.error('Test scoreboard Telegram send failed', err);
+      }
+    }
 
-  // Every 150 polls (approx 5 minutes at 2s interval), run a sweep of orphaned tricks
-  if (pollCount % 150 === 0) {
-    sweepOrphanedTricks(matchIds, sendTelegramReply).catch((err) => {
-      logger.error('Error during orphaned tricks sweep:', err);
-    });
+    // Summary log every 10 polls
+    if (pollCount % 10 === 1) {
+      logger.info(
+        `Poll #${pollCount} — ${matchIds.length} total matches, ${liveT20Count} live tracked matches, ${liveMatches.length} with scores`
+      );
+    }
+
+    // Every 150 polls (approx 5 minutes at 2s interval), run a sweep of orphaned tricks
+    if (pollCount % 150 === 0) {
+      sweepOrphanedTricks(matchIds, sendTelegramReply).catch((err) => {
+        logger.error('Error during orphaned tricks sweep:', err);
+      });
+    }
+  } catch (err) {
+    // If an unexpected error occurred during tick, apply backoff too just in case
+    currentInterval = Math.min(currentInterval * 2, MAX_INTERVAL);
+    logger.error(`❌ [Poll #${pollCount}] Unexpected error in tick:`, err);
+  } finally {
+    // Schedule the next tick recursively
+    setTimeout(tick, currentInterval);
   }
 }
 
@@ -466,9 +490,9 @@ async function main() {
 
   const mode = TEST_MODE ? '🧪 TEST MODE' : '🏏 PRODUCTION';
   logger.info(`${mode} — Cricket Wicket Alert System starting...`);
-  logger.info(`Polling every ${POLL_INTERVAL / 1000}s`);
+  logger.info(`Polling every ${BASE_INTERVAL / 1000}s`);
   if (TEST_MODE) {
-    logger.info(`Sending live scoreboard to group every ${TEST_SEND_EVERY * POLL_INTERVAL / 1000}s`);
+    logger.info(`Sending live scoreboard to group every ${TEST_SEND_EVERY * BASE_INTERVAL / 1000}s`);
   }
   logger.info('Watching: ALL live matches, first over wickets only');
   logger.info(`Alert to chat: "${process.env.TELEGRAM_CHAT_ID}"`);
@@ -508,9 +532,8 @@ async function main() {
 
   logger.success('Telegram & Twilio ready — starting poll loop...');
 
-  // First tick immediately, then every POLL_INTERVAL
+  // Start the recursive tick loop immediately (it will schedule subsequent ticks)
   tick();
-  setInterval(tick, POLL_INTERVAL);
 }
 
 main().catch((err) => {
