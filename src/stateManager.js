@@ -428,6 +428,12 @@ async function getFirstOverRuns(matchId, innings, currentScore) {
     }
   }
 
+  // If we are past the first over (> 6 balls) and could not find first over events in the DB,
+  // we cannot fall back to currentScore.runs because that represents runs at a later stage of the match.
+  if (currentScore.balls > 6) {
+    return null;
+  }
+
   // Fallback: if we don't have events or DB is not connected, use current score runs
   return currentScore.runs;
 }

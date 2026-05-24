@@ -214,23 +214,37 @@ async function handleOverRunsTrickCheck(matchId, score, match) {
     // Get the exact runs at the end of the 1st over
     const runsAtFirstOver = await getFirstOverRuns(matchId, score.innings, score);
 
-    // Check trick conditions:
-    // Innings 1: runs >= 14
-    // Innings 2: runs > 13 (which means >= 14)
-    const threshold = 14;
-    const isTargetMet = score.innings === 1 ? (runsAtFirstOver >= 14) : (runsAtFirstOver > 13);
-
     const label = await matchLabel(matchId, match);
     const battingTeam = await resolveTeamName(score.battingTeamKey);
 
+    if (runsAtFirstOver === null || runsAtFirstOver === undefined) {
+      logger.info(`📊 [OVER RUNS TRICK SKIPPED] Match ${label} Innings ${score.innings} — No first over history captured. Skipping.`);
+      await saveOverRunsTrickEvaluation({
+        matchId,
+        innings: score.innings,
+        battingTeam,
+        runsAtFirstOver: null,
+        ballsAtEvaluation: score.balls,
+        notified: false,
+        status: 'SKIPPED'
+      });
+      return;
+    }
+
+    // Check trick conditions:
+    // Innings 1: runs >= 14
+    // Innings 2: runs >= 13
+    const threshold = score.innings === 1 ? 14 : 13;
+    const isTargetMet = runsAtFirstOver >= threshold;
+
     if (isTargetMet) {
-      logger.success(`📊 [OVER RUNS TRICK SUCCESS] Match ${label} Innings ${score.innings} — ${runsAtFirstOver} runs (Threshold: ${score.innings === 1 ? '>= 14' : '> 13'}). Sending Alert.`);
+      logger.success(`📊 [OVER RUNS TRICK SUCCESS] Match ${label} Innings ${score.innings} — ${runsAtFirstOver} runs (Threshold: >= ${threshold}). Sending Alert.`);
       await sendTrickNotifyAlert({
         matchLabel: label,
         innings: score.innings,
         battingTeam,
         runs: runsAtFirstOver,
-        threshold: score.innings === 1 ? 14 : 14
+        threshold
       });
       await saveOverRunsTrickEvaluation({
         matchId,
@@ -242,7 +256,7 @@ async function handleOverRunsTrickCheck(matchId, score, match) {
         status: 'NOTIFIED'
       });
     } else {
-      logger.info(`📊 [OVER RUNS TRICK SKIPPED] Match ${label} Innings ${score.innings} — ${runsAtFirstOver} runs. Did not meet criteria.`);
+      logger.info(`📊 [OVER RUNS TRICK SKIPPED] Match ${label} Innings ${score.innings} — ${runsAtFirstOver} runs (Threshold: >= ${threshold}). Did not meet criteria.`);
       await saveOverRunsTrickEvaluation({
         matchId,
         innings: score.innings,
