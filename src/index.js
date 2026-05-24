@@ -44,6 +44,13 @@ const POLL_INTERVAL = Math.max(
 );
 const TEST_MODE = process.env.TEST_MODE === 'true';
 
+// Configurable delay for Twilio Voice Alert calls (in milliseconds)
+// Default to 5000ms (5 seconds) to ensure Telegram notification is delivered and prioritized.
+const TWILIO_CALL_DELAY_MS = Math.max(
+  parseInt(process.env.TWILIO_CALL_DELAY_MS, 10) || 5000,
+  0
+);
+
 // In test mode, send a score summary every TEST_SEND_EVERY polls
 // At 2s polling, 15 polls = every 30 seconds
 const TEST_SEND_EVERY = 15;
@@ -75,6 +82,9 @@ function validateEnv() {
 function ist() {
   return new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
 }
+
+// ── Wait helper ─────────────────────────────────────────
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ── Format a score string for display ───────────────────
 function formatScore(match) {
@@ -384,13 +394,20 @@ async function tick() {
       }).catch(() => {});
     }
 
-    // Trigger Twilio Calls asynchronously in the background (non-blocking)
-    triggerVoiceAlert({
-      battingTeam,
-      runs: score.runs,
-      wickets: score.wickets,
-      overs: score.overs
-    }).then(({ status, results }) => {
+    // Trigger Twilio Calls asynchronously in the background (non-blocking) with a configured delay
+    // to ensure the Telegram notification is received and prioritized first.
+    (async () => {
+      if (TWILIO_CALL_DELAY_MS > 0) {
+        logger.info(`⏳ Waiting ${TWILIO_CALL_DELAY_MS / 1000}s before triggering Twilio call to prioritize Telegram...`);
+        await wait(TWILIO_CALL_DELAY_MS);
+      }
+      return triggerVoiceAlert({
+        battingTeam,
+        runs: score.runs,
+        wickets: score.wickets,
+        overs: score.overs
+      });
+    })().then(({ status, results }) => {
       saveFirstOverSessionEvent({
         matchId: id,
         matchLabel: label,

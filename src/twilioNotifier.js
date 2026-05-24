@@ -46,6 +46,14 @@ function normalizePhoneNumber(num) {
  * Initializes Twilio configuration and validates required environment variables.
  */
 function initTwilio() {
+  const enableTwilio = process.env.ENABLE_TWILIO_CALLS !== 'false';
+
+  if (!enableTwilio) {
+    logger.warn('Twilio voice calling is explicitly disabled (ENABLE_TWILIO_CALLS=false). No voice alerts will be triggered.');
+    enabled = false;
+    return;
+  }
+
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
   fromNumber = process.env.TWILIO_FROM_NUMBER;
