@@ -88,6 +88,23 @@ overRunsTrickSchema.index({ matchId: 1, innings: 1 }, { unique: true });
 
 const OverRunsTrick = mongoose.model('OverRunsTrick', overRunsTrickSchema);
 
+// Define the MongoDB Schema for the 2nd Over Wicket Trick
+const secondOverWicketTrickSchema = new mongoose.Schema({
+  matchId: { type: String, required: true },
+  innings: { type: Number, required: true },
+  battingTeam: { type: String, required: true },
+  telegramMessageId: { type: Number, required: true },
+  initialWickets: { type: Number, required: true },
+  wicketBalls: { type: Number, required: true }, // ball number when 1st wicket fell in 2nd over
+  status: { type: String, enum: ['PENDING', 'DONE', 'FAIL'], default: 'PENDING' },
+  resolved: { type: Boolean, default: false },
+  completedAt: { type: Date, default: null }
+}, { timestamps: true });
+
+secondOverWicketTrickSchema.index({ matchId: 1, innings: 1 }, { unique: true });
+
+const SecondOverWicketTrick = mongoose.model('SecondOverWicketTrick', secondOverWicketTrickSchema);
+
 /**
  * Connect to MongoDB using the MONGODB_URI env variable.
  * Fallback to in-memory map if no URI is provided.
@@ -96,6 +113,7 @@ let dbConnected = false;
 const fallbackMap = new Map();
 const wicketTrickFallbackMap = new Map();
 const overRunsTrickFallbackMap = new Map();
+const secondOverWicketTrickFallbackMap = new Map();
 
 async function initDB() {
   if (process.env.MONGODB_URI) {
@@ -486,6 +504,105 @@ async function saveOverRunsTrickEvaluation({ matchId, innings, battingTeam, runs
   }
 }
 
+/**
+ * Create a new Second Over Wicket Trick session.
+ */
+async function createSecondOverWicketTrick({ matchId, innings, battingTeam, telegramMessageId, initialWickets, wicketBalls }) {
+  const data = {
+    matchId,
+    innings,
+    battingTeam,
+    telegramMessageId,
+    initialWickets,
+    wicketBalls,
+    status: 'PENDING',
+    resolved: false
+  };
+
+  if (dbConnected) {
+    try {
+      await SecondOverWicketTrick.findOneAndUpdate(
+        { matchId, innings },
+        { $set: data },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      logger.info(`💾 [DB] Created SecondOverWicketTrick for match ${matchId} Innings ${innings}`);
+    } catch (err) {
+      logger.error(`💾 [DB ERROR] Failed to create SecondOverWicketTrick:`, err);
+    }
+  } else {
+    secondOverWicketTrickFallbackMap.set(`${matchId}_${innings}`, data);
+    logger.info(`💾 [InMemory] Created SecondOverWicketTrick for match ${matchId} Innings ${innings}`);
+  }
+}
+
+/**
+ * Fetch an unresolved Second Over Wicket Trick session.
+ */
+async function getActiveSecondOverWicketTrick(matchId, innings) {
+  if (dbConnected) {
+    try {
+      return await SecondOverWicketTrick.findOne({ matchId, innings, resolved: false });
+    } catch (err) {
+      logger.error(`💾 [DB ERROR] Failed to get active SecondOverWicketTrick:`, err);
+      return null;
+    }
+  } else {
+    const trick = secondOverWicketTrickFallbackMap.get(`${matchId}_${innings}`);
+    if (trick && !trick.resolved) {
+      return trick;
+    }
+    return null;
+  }
+}
+
+/**
+ * Resolve a Second Over Wicket Trick session with DONE or FAIL.
+ */
+async function resolveSecondOverWicketTrick(matchId, innings, status) {
+  const update = {
+    status,
+    resolved: true,
+    completedAt: new Date()
+  };
+
+  if (dbConnected) {
+    try {
+      await SecondOverWicketTrick.updateOne({ matchId, innings }, { $set: update });
+      logger.info(`💾 [DB] Resolved SecondOverWicketTrick for match ${matchId} Innings ${innings} as ${status}`);
+    } catch (err) {
+      logger.error(`💾 [DB ERROR] Failed to resolve SecondOverWicketTrick:`, err);
+    }
+  } else {
+    const key = `${matchId}_${innings}`;
+    const existing = secondOverWicketTrickFallbackMap.get(key);
+    if (existing) {
+      existing.status = status;
+      existing.resolved = true;
+      existing.completedAt = new Date();
+      secondOverWicketTrickFallbackMap.set(key, existing);
+      logger.info(`💾 [InMemory] Resolved SecondOverWicketTrick for match ${matchId} Innings ${innings} as ${status}`);
+    }
+  }
+}
+
+/**
+ * Check if the 2nd Over Wicket trick has already been evaluated/created for this match and innings.
+ */
+async function checkSecondOverWicketTrickExists(matchId, innings) {
+  if (dbConnected) {
+    try {
+      const existing = await SecondOverWicketTrick.findOne({ matchId, innings });
+      return !!existing;
+    } catch (err) {
+      logger.error('💾 [DB ERROR] Failed to check SecondOverWicketTrick:', err);
+      return false;
+    }
+  } else {
+    return secondOverWicketTrickFallbackMap.has(`${matchId}_${innings}`);
+  }
+}
+
 function isDbConnected() {
   return dbConnected;
 }
@@ -503,5 +620,9 @@ module.exports = {
   sweepOrphanedTricks,
   getFirstOverRuns,
   checkOverRunsTrickEvaluated,
-  saveOverRunsTrickEvaluation
+  saveOverRunsTrickEvaluation,
+  createSecondOverWicketTrick,
+  getActiveSecondOverWicketTrick,
+  resolveSecondOverWicketTrick,
+  checkSecondOverWicketTrickExists
 };

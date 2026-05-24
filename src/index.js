@@ -23,16 +23,23 @@ const {
   sweepOrphanedTricks,
   getFirstOverRuns,
   checkOverRunsTrickEvaluated,
-  saveOverRunsTrickEvaluation
+  saveOverRunsTrickEvaluation,
+  createSecondOverWicketTrick,
+  getActiveSecondOverWicketTrick,
+  resolveSecondOverWicketTrick,
+  checkSecondOverWicketTrickExists
 } = require('./stateManager');
 const {
   initTelegram,
   sendTelegramAlert,
   sendTelegramReply,
   sendTrickNotifyAlert,
+  sendSecondOverWicketAlert,
+  sendTrickReply,
   sendTestScoreSummary
 } = require('./notifier');
-const { initTwilio, triggerVoiceAlert }           = require('./twilioNotifier');
+// Twilio calling is disabled for now
+// const { initTwilio, triggerVoiceAlert }           = require('./twilioNotifier');
 const { initTeamResolver, resolveTeamName }        = require('./teamResolver');
 const logger                                      = require('./logger');
 const express                                     = require('express');
@@ -47,12 +54,11 @@ let currentInterval = BASE_INTERVAL;
 
 const TEST_MODE = process.env.TEST_MODE === 'true';
 
-// Configurable delay for Twilio Voice Alert calls (in milliseconds)
-// Default to 5000ms (5 seconds) to ensure Telegram notification is delivered and prioritized.
-const TWILIO_CALL_DELAY_MS = Math.max(
-  parseInt(process.env.TWILIO_CALL_DELAY_MS, 10) || 5000,
-  0
-);
+// Twilio calling is disabled for now
+// const TWILIO_CALL_DELAY_MS = Math.max(
+//   parseInt(process.env.TWILIO_CALL_DELAY_MS, 10) || 5000,
+//   0
+// );
 
 // In test mode, send a score summary every TEST_SEND_EVERY polls
 // At 2s polling, 15 polls = every 30 seconds
@@ -274,6 +280,141 @@ async function handleOverRunsTrickCheck(matchId, score, match) {
   }
 }
 
+const processingSecondOverWicket = new Set();
+
+/**
+ * Detects if the first wicket falls in the 2nd over of any innings.
+ * Uses overs (not ball count) to avoid counting wides, no-balls, etc.
+ *
+ * Strategy: "2nd Over Wicket Trick"
+ *   - Trigger: First wicket falls during the 2nd over (overs 1.1 to 2.0)
+ *   - Then wait for the next wicket:
+ *     - If another wicket falls before 5th over completes (overs <= 5.0) → Done ✅
+ *     - If 5th over completes (overs >= 5.0) with no further wicket → Fail ❌
+ */
+async function handleSecondOverWicketDetection(matchId, score, match) {
+  // Only check during the 2nd over (overs 1.1 to 2.0)
+  // Overs only count legal deliveries — wides/no-balls don't advance the over count
+  if (score.overs < 1.1 || score.overs > 2.0) return;
+
+  // Only trigger if exactly 1 wicket has fallen (first wicket in 2nd over)
+  if (score.wickets !== 1) return;
+
+  // Check if we've already created a trick for this match/innings
+  const exists = await checkSecondOverWicketTrickExists(matchId, score.innings);
+  if (exists) return;
+
+  const trickKey = `2ndov_${matchId}_${score.innings}`;
+  if (processingSecondOverWicket.has(trickKey)) return;
+
+  processingSecondOverWicket.add(trickKey);
+  try {
+    const label = await matchLabel(matchId, match);
+    const battingTeam = await resolveTeamName(score.battingTeamKey);
+
+    logger.success(`🎯 [2ND OVER WICKET] Match ${label} Innings ${score.innings} — First wicket fell in 2nd over at ${score.overs} ov. Sending trick alert.`);
+
+    // Send notification to the trick channel
+    const telegramMessageId = await sendSecondOverWicketAlert({
+      matchLabel: label,
+      innings: score.innings,
+      battingTeam,
+      runs: score.runs,
+      wickets: score.wickets,
+      overs: score.overs
+    });
+
+    if (telegramMessageId) {
+      // Create the tracking session
+      await createSecondOverWicketTrick({
+        matchId,
+        innings: score.innings,
+        battingTeam,
+        telegramMessageId,
+        initialWickets: score.wickets,
+        wicketBalls: score.balls
+      });
+      logger.success(`✅ [2ND OVER WICKET] Trick session created for ${label} Innings ${score.innings} (Msg ID: ${telegramMessageId})`);
+    }
+  } catch (err) {
+    logger.error(`❌ Error during 2nd Over Wicket Detection for match ${matchId}:`, err);
+  } finally {
+    processingSecondOverWicket.delete(trickKey);
+  }
+}
+
+const processingSecondOverTrickCheck = new Set();
+
+/**
+ * Monitors an active 2nd Over Wicket Trick session.
+ * Uses overs (not ball count) for all comparisons to avoid counting wides/no-balls.
+ * Checks if another wicket falls before 5th over (overs <= 5.0) → Done
+ * Or if 5th over completes (overs >= 5.0) with no further wicket → Fail
+ */
+async function handleSecondOverWicketTrickCheck(matchId, score, match) {
+  const activeTrick = await getActiveSecondOverWicketTrick(matchId, score.innings);
+  if (!activeTrick) return;
+
+  const trickKey = `2ndov_chk_${matchId}_${score.innings}`;
+  if (processingSecondOverTrickCheck.has(trickKey)) return;
+
+  const currentWickets = score.wickets;
+  const initialWickets = activeTrick.initialWickets;
+  const currentOvers = score.overs;
+
+  // Check if match is finished
+  const resStr = (match.res && typeof match.res === 'string') ? match.res.trim() : '';
+  const isFinished = (match.d === 2 && resStr !== '' && !resStr.toLowerCase().includes('innings break')) ||
+                     (resStr !== '' && !resStr.toLowerCase().includes('innings break') && match.d !== 1);
+
+  if (currentWickets > initialWickets) {
+    if (currentOvers <= 5.0) {
+      // Success! Another wicket fell within the first 5 overs
+      processingSecondOverTrickCheck.add(trickKey);
+      logger.success(`🎯 [2ND OVER TRICK SUCCESS] Match ${matchId} innings ${score.innings} — Wickets went from ${initialWickets} to ${currentWickets} at ${score.overs} ov.`);
+      try {
+        const battingTeam = activeTrick.battingTeam;
+        const msg = `Done ✅\n*${battingTeam}*: ${score.runs}/${score.wickets} (${score.overs} ov)`;
+        await sendTrickReply(activeTrick.telegramMessageId, msg);
+        await resolveSecondOverWicketTrick(matchId, score.innings, 'DONE');
+      } catch (err) {
+        logger.error(`❌ Failed to resolve 2nd Over Wicket Trick (Success) for match ${matchId}:`, err);
+      } finally {
+        processingSecondOverTrickCheck.delete(trickKey);
+      }
+    } else {
+      // Failure: Another wicket fell but after the 5th over
+      processingSecondOverTrickCheck.add(trickKey);
+      logger.info(`🚨 [2ND OVER TRICK FAIL] Match ${matchId} innings ${score.innings} — Another wicket fell at ${score.overs} ov (after 5 overs limit).`);
+      try {
+        const battingTeam = activeTrick.battingTeam;
+        const msg = `Fail ❌ (Wicket fell after 5 overs)\n*${battingTeam}*: ${score.runs}/${score.wickets} (${score.overs} ov)`;
+        await sendTrickReply(activeTrick.telegramMessageId, msg);
+        await resolveSecondOverWicketTrick(matchId, score.innings, 'FAIL');
+      } catch (err) {
+        logger.error(`❌ Failed to resolve 2nd Over Wicket Trick (Fail) for match ${matchId}:`, err);
+      } finally {
+        processingSecondOverTrickCheck.delete(trickKey);
+      }
+    }
+  } else if (currentOvers >= 5.0 || isFinished) {
+    // Failure: 5 overs completed (or match finished) with no other wickets
+    processingSecondOverTrickCheck.add(trickKey);
+    logger.info(`🚨 [2ND OVER TRICK FAIL] Match ${matchId} innings ${score.innings} — 5 overs completed (or match finished) at ${score.overs} ov with no other wicket.`);
+    try {
+      const reason = isFinished ? 'Match finished' : '5 overs completed';
+      const battingTeam = activeTrick.battingTeam;
+      const msg = `Fail ❌ (${reason})\n*${battingTeam}*: ${score.runs}/${score.wickets} (${score.overs} ov)`;
+      await sendTrickReply(activeTrick.telegramMessageId, msg);
+      await resolveSecondOverWicketTrick(matchId, score.innings, 'FAIL');
+    } catch (err) {
+      logger.error(`❌ Failed to resolve 2nd Over Wicket Trick (Fail) for match ${matchId}:`, err);
+    } finally {
+      processingSecondOverTrickCheck.delete(trickKey);
+    }
+  }
+}
+
 // ── Single poll tick ────────────────────────────────────
 async function tick() {
   pollCount++;
@@ -328,6 +469,16 @@ async function tick() {
       // Process Over Runs Trick state checks (non-blocking)
       handleOverRunsTrickCheck(id, score, match).catch((err) => {
         logger.error(`Error in handleOverRunsTrickCheck for match ${id}:`, err);
+      });
+
+      // Process 2nd Over Wicket Trick detection (non-blocking)
+      handleSecondOverWicketDetection(id, score, match).catch((err) => {
+        logger.error(`Error in handleSecondOverWicketDetection for match ${id}:`, err);
+      });
+
+      // Process 2nd Over Wicket Trick state checks (non-blocking)
+      handleSecondOverWicketTrickCheck(id, score, match).catch((err) => {
+        logger.error(`Error in handleSecondOverWicketTrickCheck for match ${id}:`, err);
       });
 
       // Live Tracking Log for first over
@@ -424,45 +575,44 @@ async function tick() {
         }).catch(() => {});
       }
 
-      // Trigger Twilio Calls asynchronously in the background (non-blocking) with a configured delay
-      // to ensure the Telegram notification is received and prioritized first.
-      (async () => {
-        if (TWILIO_CALL_DELAY_MS > 0) {
-          logger.info(`⏳ Waiting ${TWILIO_CALL_DELAY_MS / 1000}s before triggering Twilio call to prioritize Telegram...`);
-          await wait(TWILIO_CALL_DELAY_MS);
-        }
-        return triggerVoiceAlert({
-          battingTeam,
-          runs: score.runs,
-          wickets: score.wickets,
-          overs: score.overs
-        });
-      })().then(({ status, results }) => {
-        saveFirstOverSessionEvent({
-          matchId: id,
-          matchLabel: label,
-          innings: score.innings,
-          battingTeam: battingTeam,
-          score: score,
-          notified: true,
-          action: 'twilio_alert_finished',
-          twilioStatus: status,
-          twilioError: status === 'FAILED' ? new Error(JSON.stringify(results)) : null
-        }).catch(() => {});
-      }).catch((err) => {
-        logger.error(`Twilio voice call triggers failed completely for ${label}`, err);
-        saveFirstOverSessionEvent({
-          matchId: id,
-          matchLabel: label,
-          innings: score.innings,
-          battingTeam: battingTeam,
-          score: score,
-          notified: true,
-          action: 'twilio_alert_error',
-          twilioStatus: 'FAILED',
-          twilioError: err
-        }).catch(() => {});
-      });
+      // Twilio calling is disabled for now
+      // (async () => {
+      //   if (TWILIO_CALL_DELAY_MS > 0) {
+      //     logger.info(`⏳ Waiting ${TWILIO_CALL_DELAY_MS / 1000}s before triggering Twilio call to prioritize Telegram...`);
+      //     await wait(TWILIO_CALL_DELAY_MS);
+      //   }
+      //   return triggerVoiceAlert({
+      //     battingTeam,
+      //     runs: score.runs,
+      //     wickets: score.wickets,
+      //     overs: score.overs
+      //   });
+      // })().then(({ status, results }) => {
+      //   saveFirstOverSessionEvent({
+      //     matchId: id,
+      //     matchLabel: label,
+      //     innings: score.innings,
+      //     battingTeam: battingTeam,
+      //     score: score,
+      //     notified: true,
+      //     action: 'twilio_alert_finished',
+      //     twilioStatus: status,
+      //     twilioError: status === 'FAILED' ? new Error(JSON.stringify(results)) : null
+      //   }).catch(() => {});
+      // }).catch((err) => {
+      //   logger.error(`Twilio voice call triggers failed completely for ${label}`, err);
+      //   saveFirstOverSessionEvent({
+      //     matchId: id,
+      //     matchLabel: label,
+      //     innings: score.innings,
+      //     battingTeam: battingTeam,
+      //     score: score,
+      //     notified: true,
+      //     action: 'twilio_alert_error',
+      //     twilioStatus: 'FAILED',
+      //     twilioError: err
+      //   }).catch(() => {});
+      // });
     }
 
     // ── Test mode: send live scoreboard ──
@@ -541,10 +691,10 @@ async function main() {
   // Initialise Telegram
   await initTelegram();
 
-  // Initialise Twilio
-  initTwilio();
+  // Twilio calling is disabled for now
+  // initTwilio();
 
-  logger.success('Telegram & Twilio ready — starting poll loop...');
+  logger.success('Telegram ready — starting poll loop...');
 
   // Start the recursive tick loop immediately (it will schedule subsequent ticks)
   tick();

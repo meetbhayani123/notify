@@ -98,6 +98,59 @@ _Powered by crex.com live data_`;
 }
 
 /**
+ * Send the 2nd Over Wicket Trick Alert to the trick notify channel.
+ * Returns the Telegram message_id for reply tracking.
+ */
+async function sendSecondOverWicketAlert({ matchLabel, innings, battingTeam, runs, wickets, overs }) {
+  const time = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+  const chatId = process.env.TELEGRAM_TRICK_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
+
+  const message = `🚨 *TRICK — 2nd Over Wicket!*
+
+🏏 Match   : ${matchLabel}
+🏏 Batting : *${battingTeam}* (${innings === 1 ? '1st' : '2nd'} Innings)
+📊 Score   : *${runs}/${wickets}* (${overs} ov)
+⚡ Event   : First wicket fell in the 2nd over
+🕐 Time    : ${time}
+
+_Waiting for next wicket before 5th over..._
+_Powered by crex.com live data_`;
+
+  const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+  try {
+    const response = await axios.post(url, {
+      chat_id: chatId,
+      text: message,
+      parse_mode: 'Markdown'
+    });
+    return response.data?.result?.message_id || null;
+  } catch (err) {
+    console.error('❌ Telegram 2nd over wicket trick send failed:', err.response?.data?.description || err.message);
+    throw err;
+  }
+}
+
+/**
+ * Send a reply on the trick notify channel (for Done/Fail replies on trick messages).
+ */
+async function sendTrickReply(replyToMessageId, text) {
+  const chatId = process.env.TELEGRAM_TRICK_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
+  const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+  try {
+    const response = await axios.post(url, {
+      chat_id: chatId,
+      text: text,
+      parse_mode: 'Markdown',
+      reply_to_message_id: replyToMessageId
+    });
+    return response.data?.result?.message_id || null;
+  } catch (err) {
+    console.error('❌ Telegram trick reply failed:', err.response?.data?.description || err.message);
+    throw err;
+  }
+}
+
+/**
  * Send the test mode live scoreboard.
  */
 async function sendTestScoreSummary(liveMatches) {
@@ -120,5 +173,7 @@ module.exports = {
   sendTelegramAlert,
   sendTelegramReply,
   sendTrickNotifyAlert,
+  sendSecondOverWicketAlert,
+  sendTrickReply,
   sendTestScoreSummary
 };
