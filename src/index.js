@@ -35,7 +35,7 @@ const {
   sendTelegramReply,
   sendTrickNotifyAlert,
   sendSecondOverWicketAlert,
-  sendTrickReply,
+
   sendTestScoreSummary
 } = require('./notifier');
 // Twilio calling is disabled for now
@@ -375,7 +375,7 @@ async function handleSecondOverWicketTrickCheck(matchId, score, match) {
       try {
         const battingTeam = activeTrick.battingTeam;
         const msg = `Done ✅\n*${battingTeam}*: ${score.runs}/${score.wickets} (${score.overs} ov)`;
-        await sendTrickReply(activeTrick.telegramMessageId, msg);
+        await sendTelegramReply(activeTrick.telegramMessageId, msg);
         await resolveSecondOverWicketTrick(matchId, score.innings, 'DONE');
       } catch (err) {
         logger.error(`❌ Failed to resolve 2nd Over Wicket Trick (Success) for match ${matchId}:`, err);
@@ -389,7 +389,7 @@ async function handleSecondOverWicketTrickCheck(matchId, score, match) {
       try {
         const battingTeam = activeTrick.battingTeam;
         const msg = `Fail ❌ (Wicket fell after 5 overs)\n*${battingTeam}*: ${score.runs}/${score.wickets} (${score.overs} ov)`;
-        await sendTrickReply(activeTrick.telegramMessageId, msg);
+        await sendTelegramReply(activeTrick.telegramMessageId, msg);
         await resolveSecondOverWicketTrick(matchId, score.innings, 'FAIL');
       } catch (err) {
         logger.error(`❌ Failed to resolve 2nd Over Wicket Trick (Fail) for match ${matchId}:`, err);
@@ -405,7 +405,7 @@ async function handleSecondOverWicketTrickCheck(matchId, score, match) {
       const reason = isFinished ? 'Match finished' : '5 overs completed';
       const battingTeam = activeTrick.battingTeam;
       const msg = `Fail ❌ (${reason})\n*${battingTeam}*: ${score.runs}/${score.wickets} (${score.overs} ov)`;
-      await sendTrickReply(activeTrick.telegramMessageId, msg);
+      await sendTelegramReply(activeTrick.telegramMessageId, msg);
       await resolveSecondOverWicketTrick(matchId, score.innings, 'FAIL');
     } catch (err) {
       logger.error(`❌ Failed to resolve 2nd Over Wicket Trick (Fail) for match ${matchId}:`, err);

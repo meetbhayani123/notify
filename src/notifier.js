@@ -98,12 +98,12 @@ _Powered by crex.com live data_`;
 }
 
 /**
- * Send the 2nd Over Wicket Trick Alert to the trick notify channel.
+ * Send the 2nd Over Wicket Trick Alert to the cricket notify channel.
  * Returns the Telegram message_id for reply tracking.
  */
 async function sendSecondOverWicketAlert({ matchLabel, innings, battingTeam, runs, wickets, overs }) {
   const time = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
-  const chatId = process.env.TELEGRAM_TRICK_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
 
   const message = `🚨 *TRICK — 2nd Over Wicket!*
 
