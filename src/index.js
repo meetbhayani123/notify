@@ -282,6 +282,10 @@ async function handleOverRunsTrickCheck(matchId, score, match) {
 
 const processingSecondOverWicket = new Set();
 
+// Tracks previous wicket count per match/innings to detect when a wicket
+// actually falls during the 2nd over vs. already having fallen earlier.
+const prevWicketCountMap = new Map();
+
 /**
  * Detects if the first wicket falls in the 2nd over of any innings.
  * Uses overs (not ball count) to avoid counting wides, no-balls, etc.
@@ -293,12 +297,22 @@ const processingSecondOverWicket = new Set();
  *     - If 5th over completes (overs >= 5.0) with no further wicket → Fail ❌
  */
 async function handleSecondOverWicketDetection(matchId, score, match) {
+  const stateKey = `${matchId}_${score.innings}`;
+
+  // Track wicket count transitions to know when a wicket actually falls.
+  // If we haven't seen this match/innings yet, assume 0 previous wickets.
+  const prevWickets = prevWicketCountMap.get(stateKey) || 0;
+  prevWicketCountMap.set(stateKey, score.wickets);
+
   // Only check during the 2nd over (overs 1.1 to 2.0)
   // Overs only count legal deliveries — wides/no-balls don't advance the over count
   if (score.overs < 1.1 || score.overs > 2.0) return;
 
-  // Only trigger if exactly 1 wicket has fallen (first wicket in 2nd over)
+  // Only trigger if exactly 1 wicket has fallen AND it just transitioned from 0 to 1
+  // This prevents false triggers when a wicket fell in the 1st over and we're
+  // just now polling in the 2nd over with the same wicket count.
   if (score.wickets !== 1) return;
+  if (prevWickets !== 0) return; // Wicket already existed before this poll — fell earlier
 
   // Check if we've already created a trick for this match/innings
   const exists = await checkSecondOverWicketTrickExists(matchId, score.innings);
