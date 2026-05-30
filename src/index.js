@@ -111,6 +111,46 @@ function formatScore(match) {
   return `${parts[0]}  vs  ${parts[1]}`;
 }
 
+/**
+ * Keywords that indicate a match has truly finished (result is final).
+ * We only consider a match "finished" if match.res contains one of these.
+ * This prevents false positives during live 2nd innings where the API may
+ * set d=2 and res contains informational text (target, RRR, etc.).
+ */
+const MATCH_FINISHED_KEYWORDS = [
+  'won by', 'won the', 'tied', 'draw', 'drawn',
+  'abandoned', 'no result', 'super over',
+  'dls', 'd/l', 'concede', 'forfeited'
+];
+
+/**
+ * Determine if a match is truly finished (not just innings break or live 2nd innings).
+ * @param {object} match — raw match object from the API
+ * @returns {boolean}
+ */
+function isMatchFinished(match) {
+  // d !== 2 means match is still live (d=1) or not started
+  if (match.d !== 2) return false;
+
+  const resStr = (match.res && typeof match.res === 'string') ? match.res.trim().toLowerCase() : '';
+  if (resStr === '') return false;
+
+  // Innings break is NOT a finished match
+  if (resStr.includes('innings break')) return false;
+
+  // Only consider it finished if the result string contains a definitive outcome keyword
+  const finished = MATCH_FINISHED_KEYWORDS.some(kw => resStr.includes(kw));
+
+  // Debug log to trace the decision — helps diagnose future false positives
+  if (finished) {
+    logger.info(`🏁 [isMatchFinished] Match FINISHED — d=${match.d}, res="${match.res}"`);
+  } else {
+    logger.info(`⏳ [isMatchFinished] Match NOT finished (d=${match.d}, res="${match.res}") — no result keyword found, treating as live`);
+  }
+
+  return finished;
+}
+
 const processingTricks = new Set();
 
 /**
@@ -127,11 +167,8 @@ async function handleWicketTrickCheck(matchId, score, match) {
   const initialWickets = activeTrick.initialWickets;
   const currentBalls = score.balls;
 
-  // A match is finished if d === 2 or there's a result, but we must exclude "Innings Break"
-  // which the API uses during the transition to/during the 2nd innings.
-  const resStr = (match.res && typeof match.res === 'string') ? match.res.trim() : '';
-  const isFinished = (match.d === 2 && resStr !== '' && !resStr.toLowerCase().includes('innings break')) ||
-                     (resStr !== '' && !resStr.toLowerCase().includes('innings break') && match.d !== 1);
+  // Check if the match is truly finished (final result declared)
+  const isFinished = isMatchFinished(match);
 
   if (currentWickets > initialWickets) {
     if (currentBalls <= 24) {
@@ -376,10 +413,8 @@ async function handleSecondOverWicketTrickCheck(matchId, score, match) {
   const initialWickets = activeTrick.initialWickets;
   const currentOvers = score.overs;
 
-  // Check if match is finished
-  const resStr = (match.res && typeof match.res === 'string') ? match.res.trim() : '';
-  const isFinished = (match.d === 2 && resStr !== '' && !resStr.toLowerCase().includes('innings break')) ||
-                     (resStr !== '' && !resStr.toLowerCase().includes('innings break') && match.d !== 1);
+  // Check if the match is truly finished (final result declared)
+  const isFinished = isMatchFinished(match);
 
   if (currentWickets > initialWickets) {
     if (currentOvers <= 5.0) {
