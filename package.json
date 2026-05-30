@@ -1,7 +1,7 @@
 {
   "name": "cricket-wicket-alert",
-  "version": "1.0.0",
-  "description": "WhatsApp group alert on first-over wickets in live T20 matches",
+  "version": "2.0.0",
+  "description": "Real-time Telegram notifications for live cricket match events",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
@@ -11,7 +11,9 @@
     "axios": "^1.7.2",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
-    "mongoose": "^9.6.2",
+    "mongoose": "^9.6.2"
+  },
+  "optionalDependencies": {
     "twilio": "^6.0.2"
   }
 }

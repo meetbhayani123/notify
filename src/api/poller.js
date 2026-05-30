@@ -1,10 +1,11 @@
 /**
- * poller.js
+ * api/poller.js
  * Fetches live match data from the GoScorer cricket API.
  * Never throws — returns null on any error so the poll loop continues.
  */
 
 const axios = require('axios');
+const logger = require('../lib/logger');
 
 /**
  * Fetch all live matches from the GoScorer API.
@@ -28,11 +29,11 @@ async function fetchLiveMatches() {
     return response.data;
   } catch (err) {
     if (err.response) {
-      console.warn(`⚠️  API HTTP ${err.response.status} — ${err.response.statusText}`);
+      logger.warn(`API HTTP ${err.response.status} — ${err.response.statusText}`);
     } else if (err.code === 'ECONNABORTED') {
-      console.warn('⚠️  API request timed out (8s)');
+      logger.warn('API request timed out (8s)');
     } else {
-      console.warn(`⚠️  API network error — ${err.message}`);
+      logger.warn(`API network error — ${err.message}`);
     }
     return null;
   }

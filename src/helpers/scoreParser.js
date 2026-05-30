@@ -1,5 +1,5 @@
 /**
- * scoreParser.js
+ * helpers/scoreParser.js
  * Parses the compact score strings from the GoScorer API.
  *
  * Score format:  "runs/wickets(overs"

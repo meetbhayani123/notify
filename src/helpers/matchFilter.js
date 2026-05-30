@@ -1,7 +1,9 @@
 /**
- * matchFilter.js
+ * helpers/matchFilter.js
  * Determines whether a match is live and worth monitoring.
  */
+
+const { resolveTeamName } = require('../api/teamResolver');
 
 // The user requested to monitor ALL matches, not just T20s.
 const SUSPENDED_KEYWORDS = [
@@ -9,7 +11,7 @@ const SUSPENDED_KEYWORDS = [
   'drinks', 'rain', 'bad light', 'toss delayed',
   'match abandoned', 'no result'
 ];
-// Note: Removed "innings break" from suspended keywords because the user 
+// Note: Removed "innings break" from suspended keywords because the user
 // noticed the RCB vs PBKS match disappeared during the innings break.
 
 /**
@@ -32,8 +34,6 @@ function isLiveMatch(match) {
 
   return true;
 }
-
-const { resolveTeamName } = require('./teamResolver');
 
 /**
  * Build a human-readable label for a match.
