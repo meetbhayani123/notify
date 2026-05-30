@@ -135,20 +135,20 @@ function isMatchFinished(match) {
   const resStr = (match.res && typeof match.res === 'string') ? match.res.trim().toLowerCase() : '';
   if (resStr === '') return false;
 
-  // Innings break is NOT a finished match
-  if (resStr.includes('innings break')) return false;
+    // Innings break is NOT a finished match
+    if (resStr.includes('innings break')) return false;
 
-  // Only consider it finished if the result string contains a definitive outcome keyword
-  const finished = MATCH_FINISHED_KEYWORDS.some(kw => resStr.includes(kw));
+    // Only consider it finished if the result string contains a definitive outcome keyword
+    const finished = MATCH_FINISHED_KEYWORDS.some(kw => resStr.includes(kw));
 
-  // Debug log to trace the decision — helps diagnose future false positives
-  if (finished) {
-    logger.info(`🏁 [isMatchFinished] Match FINISHED — d=${match.d}, res="${match.res}"`);
-  } else {
-    logger.info(`⏳ [isMatchFinished] Match NOT finished (d=${match.d}, res="${match.res}") — no result keyword found, treating as live`);
-  }
+    // Debug log to trace the decision — helps diagnose future false positives
+    if (finished) {
+      logger.info(`🏁 [isMatchFinished] Match FINISHED — d=${match.d}, res="${match.res}"`);
+    } else {
+      logger.info(`⏳ [isMatchFinished] Match NOT finished (d=${match.d}, res="${match.res}") — no result keyword found, treating as live`);
+    }
 
-  return finished;
+    return finished;
 }
 
 const processingTricks = new Set();
