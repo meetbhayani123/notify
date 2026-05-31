@@ -105,6 +105,32 @@ _Powered by crex.com live data_`;
   return data?.result?.message_id || null;
 }
 
+// ── Death Overs Wicket alert → trick channel ────────────
+async function sendDeathOversWicketAlert({ matchLabel, battingTeam, runs, wickets, overs, target, firstInningsRuns, firstInningsWickets }) {
+  const targetLine = target ? `🎯 Target : *${target}* (1st Inn: ${firstInningsRuns}/${firstInningsWickets})` : '';
+  const runsNeeded = target ? target - runs : null;
+  const neededLine = runsNeeded !== null ? `📉 Need   : *${runsNeeded} runs* from *${(20 - overs).toFixed(1)} overs*` : '';
+
+  const message = `🔥💀 *DEATH OVERS — 4 Wickets Down!* 💀🔥
+
+🏏 Match   : ${matchLabel}
+🏏 Batting : *${battingTeam}* (2nd Innings)
+📊 Score   : *${runs}/${wickets}* (${overs} ov)
+${targetLine}
+${neededLine}
+⚡ Event   : Exactly 4 wickets down after 16 overs!
+🕐 Time    : ${getISTTime()}
+
+🔗 *Quick Links:*
+• CBTF: https://cbtffreehit.com/sport/in-play
+• USDT: https://usdtplayer.com/sport/4
+
+_Powered by crex.com live data_`;
+
+  const data = await sendToChat(TELEGRAM_TRICK_CHAT_ID, message);
+  return data;
+}
+
 // ── Test mode scoreboard ────────────────────────────────
 async function sendTestScoreSummary(liveMatches) {
   let message = `🧪 *TEST MODE — Live Scoreboard*\n🕐 ${getISTTime()}\n\n`;
@@ -125,5 +151,6 @@ module.exports = {
   sendTelegramReply,
   sendTrickNotifyAlert,
   sendSecondOverWicketAlert,
+  sendDeathOversWicketAlert,
   sendTestScoreSummary
 };

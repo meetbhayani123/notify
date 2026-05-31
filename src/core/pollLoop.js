@@ -15,6 +15,7 @@ const { handleFirstOverWicket } = require('../strategies/firstOverWicket');
 const { handleWicketTrickCheck } = require('../strategies/wicketTrick');
 const { handleOverRunsTrick } = require('../strategies/overRunsTrick');
 const { detectSecondOverWicket, checkSecondOverWicketTrick } = require('../strategies/secondOverWicket');
+const { handleDeathOversWicketTrick } = require('../strategies/deathOversWicket');
 
 const { POLL_INTERVAL_MS, MAX_POLL_INTERVAL_MS, TEST_MODE, TEST_SEND_EVERY } = require('../config');
 const logger = require('../lib/logger');
@@ -84,6 +85,10 @@ async function tick() {
 
       checkSecondOverWicketTrick(id, score, match).catch((err) => {
         logger.error(`Error in checkSecondOverWicketTrick for match ${id}:`, err);
+      });
+
+      handleDeathOversWicketTrick(id, score, match).catch((err) => {
+        logger.error(`Error in handleDeathOversWicketTrick for match ${id}:`, err);
       });
 
       // First over wicket detection + alert (awaited for sequential flow)
