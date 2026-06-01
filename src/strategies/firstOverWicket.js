@@ -7,7 +7,7 @@ const { checkForWicket, getMatchState } = require('../db/matchStateStore');
 const { saveFirstOverSessionEvent } = require('../db/sessionStore');
 const { createWicketTrick } = require('../db/wicketTrickStore');
 const { sendTelegramAlert } = require('../services/telegram');
-const { matchLabel } = require('../helpers/matchFilter');
+const { matchLabel, enrichedMatchLabel } = require('../helpers/matchFilter');
 const { resolveTeamName } = require('../api/teamResolver');
 const logger = require('../lib/logger');
 
@@ -21,8 +21,8 @@ const logger = require('../lib/logger');
  * @param {object} match — raw match object from the API
  */
 async function handleFirstOverWicket(matchId, score, match) {
-  // Resolve label + team name once — reused by both tracking and alert paths
-  const label = await matchLabel(matchId, match);
+  // Resolve label + team name + enriched info once — reused by both tracking and alert paths
+  const { label, matchInfo } = await enrichedMatchLabel(matchId, match);
   const battingTeam = await resolveTeamName(score.battingTeamKey);
 
   // Live Tracking Log for first over
@@ -67,7 +67,8 @@ async function handleFirstOverWicket(matchId, score, match) {
       overs: score.overs,
       runs: score.runs,
       battingTeam,
-      innings: score.innings
+      innings: score.innings,
+      matchInfo
     });
     logger.success(`Telegram alert sent successfully for ${label} (Msg ID: ${telegramMessageId})`);
 

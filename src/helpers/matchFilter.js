@@ -1,9 +1,10 @@
 /**
  * helpers/matchFilter.js
  * Determines whether a match is live and worth monitoring.
+ * Also builds enriched labels with tournament, full team names, and venue.
  */
 
-const { resolveTeamName } = require('../api/teamResolver');
+const { resolveTeamName, resolveMatchInfo } = require('../api/teamResolver');
 
 // The user requested to monitor ALL matches, not just T20s.
 const SUSPENDED_KEYWORDS = [
@@ -37,6 +38,7 @@ function isLiveMatch(match) {
 
 /**
  * Build a human-readable label for a match.
+ * Uses short team names for compact display.
  *
  * @param {string} matchId
  * @param {object} match
@@ -49,4 +51,20 @@ async function matchLabel(matchId, match) {
   return `[${format}] ${teamA} vs ${teamB} (id: ${matchId})`;
 }
 
-module.exports = { isLiveMatch, matchLabel };
+/**
+ * Build an enriched label with tournament, full team names, and venue.
+ * Used in Telegram notifications for maximum context.
+ *
+ * @param {string} matchId
+ * @param {object} match – raw match object from the API
+ * @returns {Promise<object>} { label, matchInfo }
+ *   - label: compact "[T20] RCB vs PBKS (id: xxx)" string
+ *   - matchInfo: { teamAShort, teamBShort, teamAFull, teamBFull, seriesName, seriesShortName, venue, format }
+ */
+async function enrichedMatchLabel(matchId, match) {
+  const matchInfo = await resolveMatchInfo(match);
+  const label = `[${matchInfo.format}] ${matchInfo.teamAShort} vs ${matchInfo.teamBShort} (id: ${matchId})`;
+  return { label, matchInfo };
+}
+
+module.exports = { isLiveMatch, matchLabel, enrichedMatchLabel };

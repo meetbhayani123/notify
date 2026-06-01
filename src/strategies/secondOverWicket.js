@@ -17,7 +17,7 @@ const {
 } = require('../db/secondOverWicketStore');
 const { sendSecondOverWicketAlert, sendTelegramReply } = require('../services/telegram');
 const { isMatchFinished } = require('../helpers/matchHelpers');
-const { matchLabel } = require('../helpers/matchFilter');
+const { enrichedMatchLabel } = require('../helpers/matchFilter');
 const { resolveTeamName } = require('../api/teamResolver');
 const { SECOND_OVER_WICKET_MAX_OVERS } = require('../config');
 const logger = require('../lib/logger');
@@ -55,7 +55,7 @@ async function detectSecondOverWicket(matchId, score, match) {
 
   processingDetection.add(trickKey);
   try {
-    const label = await matchLabel(matchId, match);
+    const { label, matchInfo } = await enrichedMatchLabel(matchId, match);
     const battingTeam = await resolveTeamName(score.battingTeamKey);
 
     logger.success(`🎯 [2ND OVER WICKET] Match ${label} Innings ${score.innings} — First wicket fell in 2nd over at ${score.overs} ov.`);
@@ -66,7 +66,8 @@ async function detectSecondOverWicket(matchId, score, match) {
       battingTeam,
       runs: score.runs,
       wickets: score.wickets,
-      overs: score.overs
+      overs: score.overs,
+      matchInfo
     });
 
     if (telegramMessageId) {

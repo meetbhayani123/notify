@@ -22,6 +22,26 @@ function inningsLabel(innings) {
   return innings === 1 ? '1st' : '2nd';
 }
 
+/**
+ * Format optional enriched match info lines.
+ * @param {object|null} matchInfo – from enrichedMatchLabel
+ * @returns {string} formatted lines (may be empty string)
+ */
+function formatMatchInfoLines(matchInfo) {
+  if (!matchInfo) return '';
+  const lines = [];
+  if (matchInfo.seriesName) {
+    lines.push(`🏆 Series : *${matchInfo.seriesName}*`);
+  }
+  if (matchInfo.teamAFull && matchInfo.teamBFull) {
+    lines.push(`👥 Teams  : ${matchInfo.teamAFull} vs ${matchInfo.teamBFull}`);
+  }
+  if (matchInfo.venue) {
+    lines.push(`📍 Venue  : ${matchInfo.venue}`);
+  }
+  return lines.length > 0 ? lines.join('\n') + '\n' : '';
+}
+
 // ── Core send helper ────────────────────────────────────
 async function sendToChat(chatId, text, replyToMessageId = null) {
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -45,11 +65,12 @@ async function initTelegram() {
 }
 
 // ── First-over wicket alert → main channel ──────────────
-async function sendTelegramAlert({ matchLabel, newWickets, overs, runs, battingTeam, innings }) {
+async function sendTelegramAlert({ matchLabel, newWickets, overs, runs, battingTeam, innings, matchInfo }) {
+  const extraLines = formatMatchInfoLines(matchInfo);
   const message = `🚨 *WICKET ALERT — First Over!*
 
 🏏 Match   : ${matchLabel}
-🏏 Batting : *${battingTeam}* (${inningsLabel(innings)} Innings)
+${extraLines}🏏 Batting : *${battingTeam}* (${inningsLabel(innings)} Innings)
 📊 Score   : *${runs}/${newWickets}* (${overs} ov)
 ⚡ Event   : Wicket fell in the 1st over
 🕐 Time    : ${getISTTime()}
@@ -71,12 +92,13 @@ async function sendTelegramReply(replyToMessageId, text) {
 }
 
 // ── Over Runs Trick alert → trick channel ───────────────
-async function sendTrickNotifyAlert({ matchLabel, innings, battingTeam, runs, threshold }) {
+async function sendTrickNotifyAlert({ matchLabel, innings, battingTeam, runs, threshold, matchInfo }) {
   const inn = inningsLabel(innings);
+  const extraLines = formatMatchInfoLines(matchInfo);
   const message = `📊 *TRICK ALERT — ${inn} Innings Over Runs!*
 
 🏏 Match   : ${matchLabel}
-🏏 Batting : *${battingTeam}* (${inn} Innings)
+${extraLines}🏏 Batting : *${battingTeam}* (${inn} Innings)
 📈 1st Over: *${runs} runs*
 🎯 Target  : >= ${threshold} runs
 ⚡ Event   : 1st Over score met the trick criteria!
@@ -89,11 +111,12 @@ _Powered by crex.com live data_`;
 }
 
 // ── 2nd Over Wicket alert → main channel ────────────────
-async function sendSecondOverWicketAlert({ matchLabel, innings, battingTeam, runs, wickets, overs }) {
+async function sendSecondOverWicketAlert({ matchLabel, innings, battingTeam, runs, wickets, overs, matchInfo }) {
+  const extraLines = formatMatchInfoLines(matchInfo);
   const message = `🚨 *TRICK — 2nd Over Wicket!*
 
 🏏 Match   : ${matchLabel}
-🏏 Batting : *${battingTeam}* (${inningsLabel(innings)} Innings)
+${extraLines}🏏 Batting : *${battingTeam}* (${inningsLabel(innings)} Innings)
 📊 Score   : *${runs}/${wickets}* (${overs} ov)
 ⚡ Event   : First wicket fell in the 2nd over
 🕐 Time    : ${getISTTime()}
@@ -106,7 +129,8 @@ _Powered by crex.com live data_`;
 }
 
 // ── Death Overs Wicket alert → trick channel ────────────
-async function sendDeathOversWicketAlert({ matchLabel, battingTeam, runs, wickets, overs, target, firstInningsRuns, firstInningsWickets }) {
+async function sendDeathOversWicketAlert({ matchLabel, battingTeam, runs, wickets, overs, target, firstInningsRuns, firstInningsWickets, matchInfo }) {
+  const extraLines = formatMatchInfoLines(matchInfo);
   const targetLine = target ? `🎯 Target : *${target}* (1st Inn: ${firstInningsRuns}/${firstInningsWickets})` : '';
   const runsNeeded = target ? target - runs : null;
   const neededLine = runsNeeded !== null ? `📉 Need   : *${runsNeeded} runs* from *${(20 - overs).toFixed(1)} overs*` : '';
@@ -114,7 +138,7 @@ async function sendDeathOversWicketAlert({ matchLabel, battingTeam, runs, wicket
   const message = `🔥💀 *DEATH OVERS — 4 Wickets Down!* 💀🔥
 
 🏏 Match   : ${matchLabel}
-🏏 Batting : *${battingTeam}* (2nd Innings)
+${extraLines}🏏 Batting : *${battingTeam}* (2nd Innings)
 📊 Score   : *${runs}/${wickets}* (${overs} ov)
 ${targetLine}
 ${neededLine}
@@ -137,6 +161,8 @@ async function sendTestScoreSummary(liveMatches) {
 
   for (const match of liveMatches) {
     message += `🏏 *${match.label}*\n   📊 ${match.score}\n`;
+    if (match.seriesName) message += `   🏆 ${match.seriesName}\n`;
+    if (match.venue) message += `   📍 ${match.venue}\n`;
     if (match.status) message += `   📌 ${match.status}\n`;
     message += '\n';
   }

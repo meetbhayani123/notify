@@ -8,7 +8,7 @@ const { getFirstOverRuns } = require('../db/sessionStore');
 const { checkOverRunsTrickEvaluated, saveOverRunsTrickEvaluation } = require('../db/overRunsTrickStore');
 const { sendTrickNotifyAlert } = require('../services/telegram');
 const { isT20Match } = require('../helpers/matchHelpers');
-const { matchLabel } = require('../helpers/matchFilter');
+const { enrichedMatchLabel } = require('../helpers/matchFilter');
 const { resolveTeamName } = require('../api/teamResolver');
 const { FIRST_OVER_RUNS_THRESHOLD } = require('../config');
 const logger = require('../lib/logger');
@@ -35,7 +35,7 @@ async function handleOverRunsTrick(matchId, score, match) {
   processingOverRuns.add(trickKey);
   try {
     const runsAtFirstOver = await getFirstOverRuns(matchId, score.innings, score);
-    const label = await matchLabel(matchId, match);
+    const { label, matchInfo } = await enrichedMatchLabel(matchId, match);
     const battingTeam = await resolveTeamName(score.battingTeamKey);
 
     if (runsAtFirstOver === null || runsAtFirstOver === undefined) {
@@ -53,7 +53,7 @@ async function handleOverRunsTrick(matchId, score, match) {
 
     if (isTargetMet) {
       logger.success(`📊 [OVER RUNS TRICK SUCCESS] Match ${label} Innings ${score.innings} — ${runsAtFirstOver} runs (Threshold: >= ${threshold}). Sending Alert.`);
-      await sendTrickNotifyAlert({ matchLabel: label, innings: score.innings, battingTeam, runs: runsAtFirstOver, threshold });
+      await sendTrickNotifyAlert({ matchLabel: label, innings: score.innings, battingTeam, runs: runsAtFirstOver, threshold, matchInfo });
       await saveOverRunsTrickEvaluation({
         matchId, innings: score.innings, battingTeam,
         runsAtFirstOver, ballsAtEvaluation: score.balls,

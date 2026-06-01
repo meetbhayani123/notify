@@ -13,7 +13,7 @@
 const { checkDeathOversWicketEvaluated, saveDeathOversWicketEvaluation } = require('../db/deathOversWicketStore');
 const { sendDeathOversWicketAlert } = require('../services/telegram');
 const { isT20Match } = require('../helpers/matchHelpers');
-const { matchLabel } = require('../helpers/matchFilter');
+const { enrichedMatchLabel } = require('../helpers/matchFilter');
 const { resolveTeamName } = require('../api/teamResolver');
 const { parseScore } = require('../helpers/scoreParser');
 const { DEATH_OVERS_WICKET_MIN_OVERS, DEATH_OVERS_WICKET_EXACT_WICKETS } = require('../config');
@@ -43,7 +43,7 @@ async function handleDeathOversWicketTrick(matchId, score, match) {
 
   processingDeathOvers.add(trickKey);
   try {
-    const label = await matchLabel(matchId, match);
+    const { label, matchInfo } = await enrichedMatchLabel(matchId, match);
     const battingTeam = await resolveTeamName(score.battingTeamKey);
 
     // Parse 1st innings score to include as context (target info)
@@ -63,7 +63,8 @@ async function handleDeathOversWicketTrick(matchId, score, match) {
         overs: score.overs,
         target: firstInningsScore ? firstInningsScore.runs + 1 : null,
         firstInningsRuns: firstInningsScore ? firstInningsScore.runs : null,
-        firstInningsWickets: firstInningsScore ? firstInningsScore.wickets : null
+        firstInningsWickets: firstInningsScore ? firstInningsScore.wickets : null,
+        matchInfo
       });
 
       await saveDeathOversWicketEvaluation({

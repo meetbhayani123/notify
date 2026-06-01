@@ -4,7 +4,7 @@
  */
 
 const { fetchLiveMatches } = require('../api/poller');
-const { isLiveMatch, matchLabel } = require('../helpers/matchFilter');
+const { isLiveMatch, matchLabel, enrichedMatchLabel } = require('../helpers/matchFilter');
 const { getCurrentInningsScore } = require('../helpers/scoreParser');
 const { formatScore } = require('../helpers/matchHelpers');
 const { sweepOrphanedTricks } = require('../db/wicketTrickStore');
@@ -53,13 +53,15 @@ async function tick() {
       // ── Test mode: collect live matches with actual scores ──
       const isLive = isLiveMatch(match);
       if (TEST_MODE && isLive && (match.j || match.k)) {
-        const label = await matchLabel(id, match);
+        const { label, matchInfo } = await enrichedMatchLabel(id, match);
         const score = getCurrentInningsScore(match);
         liveMatches.push({
           label,
           score: formatScore(match),
           status: match.res || (score ? `${score.overs} ov bowled` : ''),
-          currentScore: score
+          currentScore: score,
+          seriesName: matchInfo.seriesName,
+          venue: matchInfo.venue
         });
       }
 
