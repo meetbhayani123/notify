@@ -1,9 +1,11 @@
 /**
  * strategies/secondOverWicket.js
- * Detects first wicket falling in the 2nd over and tracks trick outcome.
+ * Detects a wicket falling in the 2nd over and tracks trick outcome.
  *
  * Strategy: "2nd Over Wicket Trick"
- *   - Trigger: First wicket falls during the 2nd over (overs 1.1 to 2.0)
+ *   - Trigger: ANY new wicket falls during the 2nd over (overs 1.1 to 2.0)
+ *     - Scenario A: First wicket falls in the 2nd over (0→1)
+ *     - Scenario B: 1st wicket fell in the 1st over, another falls in the 2nd over (1→2)
  *   - Then wait for the next wicket:
  *     - If another wicket falls before 5th over completes (overs <= 5.0) → Done ✅
  *     - If 5th over completes (overs >= 5.0) with no further wicket → Fail ❌
@@ -30,7 +32,10 @@ const processingDetection = new Set();
 const prevWicketCountMap = new Map();
 
 /**
- * Detects if the first wicket falls in the 2nd over of any innings.
+ * Detects if a wicket falls in the 2nd over of any innings.
+ * Covers two scenarios:
+ *   A) First wicket falls in the 2nd over (0→1 transition)
+ *   B) 1st wicket already fell in the 1st over, another falls in the 2nd over (1→2)
  * Uses overs (not ball count) to avoid counting wides, no-balls, etc.
  */
 async function detectSecondOverWicket(matchId, score, match) {
@@ -43,8 +48,8 @@ async function detectSecondOverWicket(matchId, score, match) {
   // Only check during the 2nd over (overs 1.1 to 2.0)
   if (score.overs < 1.1 || score.overs > 2.0) return;
 
-  // Only trigger if exactly 1 wicket has fallen AND it just transitioned from 0 to 1
-  if (score.wickets !== 1 || prevWickets !== 0) return;
+  // A new wicket must have JUST fallen in this poll (wicket count increased)
+  if (score.wickets <= prevWickets) return;
 
   // Check if we've already created a trick for this match/innings
   const exists = await checkSecondOverWicketTrickExists(matchId, score.innings);
@@ -58,7 +63,7 @@ async function detectSecondOverWicket(matchId, score, match) {
     const { label, matchInfo } = await enrichedMatchLabel(matchId, match);
     const battingTeam = await resolveTeamName(score.battingTeamKey);
 
-    logger.success(`🎯 [2ND OVER WICKET] Match ${label} Innings ${score.innings} — First wicket fell in 2nd over at ${score.overs} ov.`);
+    logger.success(`🎯 [2ND OVER WICKET] Match ${label} Innings ${score.innings} — Wicket #${score.wickets} fell in 2nd over at ${score.overs} ov.`);
 
     const telegramMessageId = await sendSecondOverWicketAlert({
       matchLabel: label,

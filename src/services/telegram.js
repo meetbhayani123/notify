@@ -113,12 +113,15 @@ _Powered by crex.com live data_`;
 // ── 2nd Over Wicket alert → main channel ────────────────
 async function sendSecondOverWicketAlert({ matchLabel, innings, battingTeam, runs, wickets, overs, matchInfo }) {
   const extraLines = formatMatchInfoLines(matchInfo);
+  const eventDesc = wickets === 1
+    ? 'First wicket fell in the 2nd over'
+    : `Wicket #${wickets} fell in the 2nd over`;
   const message = `🚨 *TRICK — 2nd Over Wicket!*
 
 🏏 Match   : ${matchLabel}
 ${extraLines}🏏 Batting : *${battingTeam}* (${inningsLabel(innings)} Innings)
 📊 Score   : *${runs}/${wickets}* (${overs} ov)
-⚡ Event   : First wicket fell in the 2nd over
+⚡ Event   : ${eventDesc}
 🕐 Time    : ${getISTTime()}
 
 _Waiting for next wicket before 5th over..._
