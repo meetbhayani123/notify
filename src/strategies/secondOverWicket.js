@@ -17,7 +17,7 @@ const {
   resolveSecondOverWicketTrick,
   checkSecondOverWicketTrickExists
 } = require('../db/secondOverWicketStore');
-const { sendSecondOverWicketAlert, sendTelegramReply } = require('../services/telegram');
+const { sendSecondOverWicketAlert, sendTrickReply } = require('../services/telegram');
 const { isMatchFinished } = require('../helpers/matchHelpers');
 const { enrichedMatchLabel } = require('../helpers/matchFilter');
 const { resolveTeamName } = require('../api/teamResolver');
@@ -100,9 +100,9 @@ const processingTrickCheck = new Set();
  * Send a trick outcome reply and resolve the trick in DB.
  */
 async function resolveTrick(matchId, score, activeTrick, status, reason) {
-  const emoji = status === 'DONE' ? 'Done ✅' : `Fail ❌ (${reason})`;
-  const msg = `${emoji}\n*${activeTrick.battingTeam}*: ${score.runs}/${score.wickets} (${score.overs} ov)`;
-  await sendTelegramReply(activeTrick.telegramMessageId, msg);
+  const emoji = status === 'DONE' ? '✅ *DONE*' : `❌ *FAIL* — ${reason}`;
+  const msg = `${emoji}\n*${activeTrick.battingTeam}*  ·  ${score.runs}/${score.wickets} (${score.overs} ov)`;
+  await sendTrickReply(activeTrick.telegramMessageId, msg);
   await resolveSecondOverWicketTrick(matchId, score.innings, status);
 }
 
