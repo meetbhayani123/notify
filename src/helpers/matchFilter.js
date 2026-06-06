@@ -2,9 +2,50 @@
  * helpers/matchFilter.js
  * Determines whether a match is live and worth monitoring.
  * Also builds enriched labels with tournament, full team names, and venue.
+ * Provides series muting logic to suppress notifications for unwanted tournaments.
  */
 
 const { resolveTeamName, resolveMatchInfo } = require('../api/teamResolver');
+const Series = require('../db/models/Series');
+const mongoose = require('mongoose');
+const logger = require('../lib/logger');
+
+// In-memory cache for muted series keys (refreshed every 60s)
+let mutedSeriesCache = new Set();
+let mutedCacheLastRefresh = 0;
+const MUTED_CACHE_TTL_MS = 60_000; // 60 seconds
+
+/**
+ * Refresh the muted series cache from MongoDB.
+ * Called before each poll cycle.
+ */
+async function refreshMutedSeriesCache() {
+  const now = Date.now();
+  if (now - mutedCacheLastRefresh < MUTED_CACHE_TTL_MS) return;
+
+  if (mongoose.connection.readyState !== 1) return;
+
+  try {
+    const mutedSeries = await Series.find({ muted: true }, { f_key: 1 }).lean();
+    mutedSeriesCache = new Set(mutedSeries.map(s => s.f_key));
+    mutedCacheLastRefresh = now;
+  } catch (err) {
+    logger.error('Failed to refresh muted series cache:', err);
+  }
+}
+
+/**
+ * Check if a match belongs to a muted series.
+ * Uses the match's `q` field (series key, prefixed with `^`).
+ *
+ * @param {object} match — raw match object from the API
+ * @returns {boolean} true if the series is muted
+ */
+function isSeriesMuted(match) {
+  if (!match.q) return false;
+  const seriesKey = match.q.replace(/^\^/, '');
+  return mutedSeriesCache.has(seriesKey);
+}
 
 // The user requested to monitor ALL matches, not just T20s.
 const SUSPENDED_KEYWORDS = [
@@ -74,4 +115,4 @@ async function enrichedMatchLabel(matchId, match) {
   return { label, matchInfo };
 }
 
-module.exports = { isLiveMatch, matchLabel, enrichedMatchLabel };
+module.exports = { isLiveMatch, isSeriesMuted, refreshMutedSeriesCache, matchLabel, enrichedMatchLabel };

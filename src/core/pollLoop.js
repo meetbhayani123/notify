@@ -4,7 +4,7 @@
  */
 
 const { fetchLiveMatches } = require('../api/poller');
-const { isLiveMatch, matchLabel, enrichedMatchLabel } = require('../helpers/matchFilter');
+const { isLiveMatch, isSeriesMuted, refreshMutedSeriesCache, matchLabel, enrichedMatchLabel } = require('../helpers/matchFilter');
 const { getCurrentInningsScore } = require('../helpers/scoreParser');
 const { formatScore } = require('../helpers/matchHelpers');
 const { sweepOrphanedTricks } = require('../db/wicketTrickStore');
@@ -43,8 +43,12 @@ async function tick() {
     }
     currentInterval = POLL_INTERVAL_MS;
 
+    // Refresh muted series cache (with 60s TTL)
+    await refreshMutedSeriesCache();
+
     const matchIds = Object.keys(data);
     let liveMatchCount = 0;
+    let mutedMatchCount = 0;
     const liveMatches = [];
 
     for (const id of matchIds) {
@@ -68,6 +72,12 @@ async function tick() {
       // ── Production: process all live matches ──
       if (!isLive) continue;
       liveMatchCount++;
+
+      // Skip matches in muted series
+      if (isSeriesMuted(match)) {
+        mutedMatchCount++;
+        continue;
+      }
 
       const score = getCurrentInningsScore(match);
       if (!score) continue;
@@ -109,8 +119,9 @@ async function tick() {
 
     // Summary log every 10 polls
     if (pollCount % 10 === 1) {
+      const mutedInfo = mutedMatchCount > 0 ? `, ${mutedMatchCount} muted` : '';
       logger.info(
-        `Poll #${pollCount} — ${matchIds.length} total matches, ${liveMatchCount} live tracked, ${liveMatches.length} with scores`
+        `Poll #${pollCount} — ${matchIds.length} total matches, ${liveMatchCount} live tracked${mutedInfo}, ${liveMatches.length} with scores`
       );
     }
 

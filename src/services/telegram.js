@@ -78,9 +78,14 @@ async function initTelegram() {
 
 // ── First-over wicket alert → main channel ──────────────
 async function sendTelegramAlert({ matchLabel, newWickets, overs, runs, battingTeam, innings, matchInfo }) {
+  const fullNames = (matchInfo && matchInfo.teamAFull && matchInfo.teamBFull)
+    ? `${matchInfo.teamAFull} vs ${matchInfo.teamBFull}`
+    : matchLabel;
+
   const message = [
     `🚨 *1ST OVER WICKET!*`,
     `*${battingTeam}*  ·  *${runs}/${newWickets}* (${overs} ov)`,
+    `🏐 ${fullNames}`,
     `${matchLabel}  ·  ${innTag(innings)}`,
     ``,
     `⚡ Wicket fell in the 1st over`,
@@ -102,9 +107,14 @@ async function sendTelegramReply(replyToMessageId, text) {
 
 // ── Over Runs Trick alert → trick channel ───────────────
 async function sendTrickNotifyAlert({ matchLabel, innings, battingTeam, runs, threshold, matchInfo }) {
+  const fullNames = (matchInfo && matchInfo.teamAFull && matchInfo.teamBFull)
+    ? `${matchInfo.teamAFull} vs ${matchInfo.teamBFull}`
+    : matchLabel;
+
   const message = [
     `📈 *1ST OVER RUNS — TRICK*`,
     `*${battingTeam}* scored *${runs} runs* in 1st over`,
+    `🏐 ${fullNames}`,
     `${matchLabel}  ·  ${innTag(innings)}`,
     `🎯 Target ≥ ${threshold} runs`,
     contextFooter(matchInfo),
@@ -121,9 +131,14 @@ async function sendSecondOverWicketAlert({ matchLabel, innings, battingTeam, run
     ? 'First wicket fell in 2nd over'
     : `Wicket #${wickets} fell in 2nd over`;
 
+  const fullNames = (matchInfo && matchInfo.teamAFull && matchInfo.teamBFull)
+    ? `${matchInfo.teamAFull} vs ${matchInfo.teamBFull}`
+    : matchLabel;
+
   const message = [
     `🎯 *2ND OVER WICKET — TRICK*`,
     `*${battingTeam}*  ·  *${runs}/${wickets}* (${overs} ov)`,
+    `🏐 ${fullNames}`,
     `${matchLabel}  ·  ${innTag(innings)}`,
     ``,
     `⚡ ${event}`,
@@ -147,9 +162,14 @@ async function sendDeathOversWicketAlert({ matchLabel, battingTeam, runs, wicket
   const runsNeeded = target ? target - runs : null;
   const oversLeft  = (20 - overs).toFixed(1);
 
+  const fullNames = (matchInfo && matchInfo.teamAFull && matchInfo.teamBFull)
+    ? `${matchInfo.teamAFull} vs ${matchInfo.teamBFull}`
+    : matchLabel;
+
   const lines = [
     `💀 *DEATH OVERS — 4 WKTS DOWN*`,
     `*${battingTeam}*  ·  *${runs}/${wickets}* (${overs} ov)`,
+    `🏐 ${fullNames}`,
     `${matchLabel}  ·  2nd Inn`,
   ];
 
