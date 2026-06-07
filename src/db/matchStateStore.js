@@ -24,23 +24,14 @@ async function checkForWicket(matchId, score) {
   const isNewOrReset = !prev || (score.overs < prev.overs - 1);
   const hasNotified = (!isNewOrReset && prev) ? prev.notified : false;
 
-  // Standard detection: wicket seen while still in the first over
-  const directDetection =
+  // Standard detection: wicket seen while still in the first over (0.1–1.0).
+  // Only triggers when isFirstOver is true (balls 1–6), ensuring wickets
+  // at 1.1+ (2nd over) are NOT incorrectly flagged as first-over wickets.
+  // Those are handled separately by the secondOverWicket strategy.
+  const wicketFell =
     score.isFirstOver &&
     score.wickets > 0 &&
     !hasNotified;
-
-  // Safety-net: wicket fell on the LAST ball of over 1 but poll only sees it
-  // in the early 2nd over (1.1–2.0). Previous poll was in the 1st over with
-  // 0 wickets, now we see wickets > 0 just past the 1st over b oundary.
-  const retroDetection =
-    !hasNotified &&
-    !score.isFirstOver &&
-    score.overs >= 1.1 && score.overs <= 2.0 &&
-    score.wickets > 0 &&
-    prev && prev.overs <= 1.0 && prev.wickets === 0;
-
-  const wicketFell = directDetection || retroDetection;
 
   const newNotified = hasNotified || wicketFell;
 
