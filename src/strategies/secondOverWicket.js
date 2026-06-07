@@ -17,6 +17,7 @@ const {
   resolveSecondOverWicketTrick,
   checkSecondOverWicketTrickExists
 } = require('../db/secondOverWicketStore');
+const { getActiveWicketTrick } = require('../db/wicketTrickStore');
 const { sendSecondOverWicketAlert, sendTrickReply } = require('../services/telegram');
 const { isMatchFinished } = require('../helpers/matchHelpers');
 const { enrichedMatchLabel } = require('../helpers/matchFilter');
@@ -37,6 +38,9 @@ const prevWicketCountMap = new Map();
  *   A) First wicket falls in the 2nd over (0→1 transition)
  *   B) 1st wicket already fell in the 1st over, another falls in the 2nd over (1→2)
  * Uses overs (not ball count) to avoid counting wides, no-balls, etc.
+ *
+ * NOTE: If a first-over WicketTrick is already active for this match/innings,
+ * the 2nd-over wicket trick is skipped to avoid duplicate notifications.
  */
 async function detectSecondOverWicket(matchId, score, match) {
   const stateKey = `${matchId}_${score.innings}`;
@@ -50,6 +54,15 @@ async function detectSecondOverWicket(matchId, score, match) {
 
   // A new wicket must have JUST fallen in this poll (wicket count increased)
   if (score.wickets <= prevWickets) return;
+
+  // Skip if a first-over WicketTrick is already tracking this match/innings.
+  // That trick will produce its own "Done" notification for this wicket,
+  // so sending a separate 2nd-over trick alert would be redundant.
+  const activeFirstOverTrick = await getActiveWicketTrick(matchId, score.innings);
+  if (activeFirstOverTrick) {
+    logger.info(`⏭️ [2ND OVER WICKET] Skipping — active 1st-over WicketTrick exists for match ${matchId} innings ${score.innings}`);
+    return;
+  }
 
   // Check if we've already created a trick for this match/innings
   const exists = await checkSecondOverWicketTrickExists(matchId, score.innings);
