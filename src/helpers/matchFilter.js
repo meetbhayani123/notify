@@ -110,7 +110,7 @@ async function matchLabel(matchId, match) {
  *   - matchInfo: { teamAShort, teamBShort, teamAFull, teamBFull, seriesName, seriesShortName, venue, format }
  */
 async function enrichedMatchLabel(matchId, match) {
-  const matchInfo = await resolveMatchInfo(match);
+  const matchInfo = await resolveMatchInfo(match, matchId);
   const label = `[${matchInfo.format}] ${matchInfo.teamAShort} vs ${matchInfo.teamBShort} (id: ${matchId})`;
   return { label, matchInfo };
 }

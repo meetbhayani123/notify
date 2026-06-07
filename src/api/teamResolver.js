@@ -20,6 +20,7 @@ const logger = require('../lib/logger');
 const teamCache = {};
 const seriesCache = {};
 const venueCache = {};
+const matchSlugCache = {};
 let isFetchingWeb = false;
 
 /**
@@ -118,6 +119,24 @@ async function fetchMappingsFromWeb() {
       }
       if (venueOps.length > 0) await Venue.bulkWrite(venueOps);
       logger.success(`Synced ${payload.v.length} venues from web`);
+    }
+
+    // ── Match URL slugs ───────────────────────────────
+    // The CREX homepage getLiveMatches payload includes a `matchTitle` field
+    // for every match, which is the URL slug used to construct the match page link.
+    const liveKey = Object.keys(data).find(k => k.includes('getLiveMatches'));
+    if (liveKey && data[liveKey]) {
+      const liveMatches = data[liveKey];
+      let slugCount = 0;
+      for (const [matchId, matchData] of Object.entries(liveMatches)) {
+        if (matchData.matchTitle) {
+          matchSlugCache[matchId] = matchData.matchTitle;
+          slugCount++;
+        }
+      }
+      if (slugCount > 0) {
+        logger.success(`Cached ${slugCount} match URL slugs from CREX`);
+      }
     }
   } catch (err) {
     logger.error('Failed to fetch mappings from web:', err);
@@ -235,10 +254,23 @@ async function resolveVenueName(venueKey) {
 }
 
 /**
- * Resolves all extra info for a match object in one call.
- * Returns { teamAShort, teamBShort, teamAFull, teamBFull, seriesName, seriesShortName, venue, format }.
+ * Build a CREX match page URL from the cached matchTitle slug.
+ * Returns the full URL if slug is cached, otherwise null.
+ *
+ * @param {string} matchId — the match ID (e.g. "1232", "10ZC")
+ * @returns {string|null}
  */
-async function resolveMatchInfo(match) {
+function resolveMatchUrl(matchId) {
+  const slug = matchSlugCache[matchId];
+  if (!slug) return null;
+  return `https://crex.com/cricket-live-score/${slug}-match-updates-${matchId}`;
+}
+
+/**
+ * Resolves all extra info for a match object in one call.
+ * Returns { teamAShort, teamBShort, teamAFull, teamBFull, seriesName, seriesShortName, venue, format, matchUrl }.
+ */
+async function resolveMatchInfo(match, matchId) {
   const [teamAShort, teamBShort, teamAFull, teamBFull, seriesName, seriesShortName, venue] = await Promise.all([
     resolveTeamName(match.b),
     resolveTeamName(match.c),
@@ -257,7 +289,8 @@ async function resolveMatchInfo(match) {
     seriesName,
     seriesShortName,
     venue,
-    format: match.fo || 'Match'
+    format: match.fo || 'Match',
+    matchUrl: matchId ? resolveMatchUrl(matchId) : null
   };
 }
 
@@ -268,5 +301,6 @@ module.exports = {
   resolveSeriesName,
   resolveSeriesShortName,
   resolveVenueName,
+  resolveMatchUrl,
   resolveMatchInfo
 };

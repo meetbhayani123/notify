@@ -44,9 +44,13 @@ function contextFooter(matchInfo) {
   return parts.length > 0 ? '\n' + parts.join('\n') : '';
 }
 
-/** Quick-links one-liner. */
-function quickLinks() {
-  return `[CBTF](https://cbtffreehit.com/sport/in-play)  ·  [USDT](https://usdtplayer.com/sport/4)`;
+/** Quick-links one-liner. Includes CREX match link when available. */
+function quickLinks(matchUrl) {
+  const links = [];
+  if (matchUrl) links.push(`[CREX](${matchUrl})`);
+  links.push(`[CBTF](https://cbtffreehit.com/sport/in-play)`);
+  links.push(`[USDT](https://usdtplayer.com/sport/4)`);
+  return links.join('  ·  ');
 }
 
 // ── Core send helper ────────────────────────────────────
@@ -82,6 +86,8 @@ async function sendTelegramAlert({ matchLabel, newWickets, overs, runs, battingT
     ? `${matchInfo.teamAFull} vs ${matchInfo.teamBFull}`
     : matchLabel;
 
+  const matchUrl = matchInfo?.matchUrl || null;
+
   const message = [
     `🚨 *1ST OVER WICKET!*`,
     `*${battingTeam}*  ·  *${runs}/${newWickets}* (${overs} ov)`,
@@ -92,7 +98,7 @@ async function sendTelegramAlert({ matchLabel, newWickets, overs, runs, battingT
     contextFooter(matchInfo),
     `⏰ ${getISTTime()}`,
     ``,
-    `🔗 ${quickLinks()}`,
+    `🔗 ${quickLinks(matchUrl)}`,
   ].filter(l => l !== null).join('\n');
 
   const data = await sendToChat(TELEGRAM_CHAT_ID, message);
@@ -111,6 +117,8 @@ async function sendTrickNotifyAlert({ matchLabel, innings, battingTeam, runs, th
     ? `${matchInfo.teamAFull} vs ${matchInfo.teamBFull}`
     : matchLabel;
 
+  const matchUrl = matchInfo?.matchUrl || null;
+
   const message = [
     `📈 *1ST OVER RUNS — TRICK*`,
     `*${battingTeam}* scored *${runs} runs* in 1st over`,
@@ -119,6 +127,8 @@ async function sendTrickNotifyAlert({ matchLabel, innings, battingTeam, runs, th
     `🎯 Target ≥ ${threshold} runs`,
     contextFooter(matchInfo),
     `⏰ ${getISTTime()}`,
+    ``,
+    `🔗 ${quickLinks(matchUrl)}`,
   ].filter(l => l !== null).join('\n');
 
   const data = await sendToChat(TELEGRAM_TRICK_CHAT_ID, message);
@@ -135,6 +145,8 @@ async function sendSecondOverWicketAlert({ matchLabel, innings, battingTeam, run
     ? `${matchInfo.teamAFull} vs ${matchInfo.teamBFull}`
     : matchLabel;
 
+  const matchUrl = matchInfo?.matchUrl || null;
+
   const message = [
     `🎯 *2ND OVER WICKET — TRICK*`,
     `*${battingTeam}*  ·  *${runs}/${wickets}* (${overs} ov)`,
@@ -145,6 +157,8 @@ async function sendSecondOverWicketAlert({ matchLabel, innings, battingTeam, run
     `⏳ _Next wicket before 5th over..._`,
     contextFooter(matchInfo),
     `⏰ ${getISTTime()}`,
+    ``,
+    `🔗 ${quickLinks(matchUrl)}`,
   ].filter(l => l !== null).join('\n');
 
   const data = await sendToChat(TELEGRAM_TRICK_CHAT_ID, message);
@@ -166,6 +180,8 @@ async function sendDeathOversWicketAlert({ matchLabel, battingTeam, runs, wicket
     ? `${matchInfo.teamAFull} vs ${matchInfo.teamBFull}`
     : matchLabel;
 
+  const matchUrl = matchInfo?.matchUrl || null;
+
   const lines = [
     `💀 *DEATH OVERS — 4 WKTS DOWN*`,
     `*${battingTeam}*  ·  *${runs}/${wickets}* (${overs} ov)`,
@@ -183,7 +199,7 @@ async function sendDeathOversWicketAlert({ matchLabel, battingTeam, runs, wicket
     contextFooter(matchInfo),
     `⏰ ${getISTTime()}`,
     ``,
-    `🔗 ${quickLinks()}`,
+    `🔗 ${quickLinks(matchUrl)}`,
   );
 
   const message = lines.filter(l => l !== null).join('\n');
