@@ -22,6 +22,8 @@ const seriesCache = {};
 const venueCache = {};
 const matchSlugCache = {};
 let isFetchingWeb = false;
+let slugCacheLastRefresh = 0;
+const SLUG_CACHE_TTL_MS = 300_000; // 5 minutes
 
 /**
  * Force fetch all teams, series, and venues from CREX homepage and upsert to MongoDB.
@@ -294,6 +296,24 @@ async function resolveMatchInfo(match, matchId) {
   };
 }
 
+/**
+ * Periodically refresh match URL slugs from CREX homepage.
+ * Called from the poll loop to keep slugs up to date for new matches.
+ * Uses a 5-minute TTL to avoid excessive scraping.
+ */
+async function refreshMatchSlugs() {
+  const now = Date.now();
+  if (now - slugCacheLastRefresh < SLUG_CACHE_TTL_MS) return;
+  slugCacheLastRefresh = now;
+
+  try {
+    logger.info('🔄 Refreshing match URL slugs from CREX...');
+    await fetchMappingsFromWeb();
+  } catch (err) {
+    logger.error('Failed to refresh match slugs:', err);
+  }
+}
+
 module.exports = {
   initTeamResolver,
   resolveTeamName,
@@ -302,5 +322,6 @@ module.exports = {
   resolveSeriesShortName,
   resolveVenueName,
   resolveMatchUrl,
-  resolveMatchInfo
+  resolveMatchInfo,
+  refreshMatchSlugs
 };

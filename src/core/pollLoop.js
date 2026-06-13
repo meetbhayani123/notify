@@ -5,6 +5,7 @@
 
 const { fetchLiveMatches } = require('../api/poller');
 const { isLiveMatch, isSeriesMuted, refreshMutedSeriesCache, matchLabel, enrichedMatchLabel } = require('../helpers/matchFilter');
+const { refreshMatchSlugs } = require('../api/teamResolver');
 const { getCurrentInningsScore } = require('../helpers/scoreParser');
 const { formatScore } = require('../helpers/matchHelpers');
 const { sweepOrphanedTricks } = require('../db/wicketTrickStore');
@@ -45,6 +46,9 @@ async function tick() {
 
     // Refresh muted series cache (with 60s TTL)
     await refreshMutedSeriesCache();
+
+    // Refresh CREX match URL slugs (with 5min TTL)
+    await refreshMatchSlugs();
 
     const matchIds = Object.keys(data);
     let liveMatchCount = 0;
