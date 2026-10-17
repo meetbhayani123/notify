@@ -27,7 +27,6 @@ async function checkForWicket(matchId, score) {
   // Standard detection: wicket seen while still in the first over (0.1–1.0).
   // Only triggers when isFirstOver is true (balls 1–6), ensuring wickets
   // at 1.1+ (2nd over) are NOT incorrectly flagged as first-over wickets.
-  // Those are handled separately by the secondOverWicket strategy.
   const wicketFell =
     score.isFirstOver &&
     score.wickets > 0 &&

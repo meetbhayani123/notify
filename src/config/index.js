@@ -28,12 +28,31 @@ const T20_FORMAT_KEYWORDS = [
   't20', 'ipl', 'hundred', 'bbl', 'cpl', 'psl', 'wpl', 't-20'
 ];
 
+// ── ODI Format Detection ────────────────────────────────
+const ODI_FORMAT_KEYWORDS = [
+  'odi', 'one day', 'one-day', 'oneday', 'list a'
+];
+
 // ── Trick Thresholds ────────────────────────────────────
 const FIRST_OVER_RUNS_THRESHOLD = { 1: 14, 2: 13 };
 const WICKET_TRICK_MAX_BALLS = 24;
-const SECOND_OVER_WICKET_MAX_OVERS = 5.0;
 const DEATH_OVERS_WICKET_MIN_OVERS = 16.0;
 const DEATH_OVERS_WICKET_EXACT_WICKETS = 4;
+
+// ── Scorecard Trick Thresholds ──────────────────────────
+// Openers trick (ODI): a strike rate of 101+ counts as "over 100".
+const OPENER_HIGH_SR_MIN = 101;
+// Captain cheap-dismissal trick (T20): under 100 SR off 10 or more balls.
+const CAPTAIN_CHEAP_MAX_SR = 100;
+const CAPTAIN_CHEAP_MIN_BALLS = 10;
+
+// ── Scorecard API ───────────────────────────────────────
+const SCORECARD_API_URL = process.env.SCORECARD_API_URL
+  || 'https://api.goscorer.com/api/v3/getSC4';
+const PLAYER_MAP_API_URL = process.env.PLAYER_MAP_API_URL
+  || 'https://oc.crickapi.com/mapping/getHomeMapData';
+// Per-match scorecard cache, so repeated polls never hammer the API.
+const SCORECARD_CACHE_TTL_MS = 20_000;
 
 // ── Telegram ────────────────────────────────────────────
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -69,11 +88,17 @@ module.exports = {
   TEST_SEND_EVERY,
   MATCH_FINISHED_KEYWORDS,
   T20_FORMAT_KEYWORDS,
+  ODI_FORMAT_KEYWORDS,
   FIRST_OVER_RUNS_THRESHOLD,
   WICKET_TRICK_MAX_BALLS,
-  SECOND_OVER_WICKET_MAX_OVERS,
   DEATH_OVERS_WICKET_MIN_OVERS,
   DEATH_OVERS_WICKET_EXACT_WICKETS,
+  OPENER_HIGH_SR_MIN,
+  CAPTAIN_CHEAP_MAX_SR,
+  CAPTAIN_CHEAP_MIN_BALLS,
+  SCORECARD_API_URL,
+  PLAYER_MAP_API_URL,
+  SCORECARD_CACHE_TTL_MS,
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID,
   TELEGRAM_TRICK_CHAT_ID,

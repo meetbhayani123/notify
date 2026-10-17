@@ -4,19 +4,21 @@
  */
 
 const { fetchLiveMatches } = require('../api/poller');
-const { isLiveMatch, isSeriesMuted, refreshMutedSeriesCache, matchLabel, enrichedMatchLabel } = require('../helpers/matchFilter');
+const { isLiveMatch, isSeriesMuted, refreshMutedSeriesCache, enrichedMatchLabel } = require('../helpers/matchFilter');
 const { refreshMatchSlugs } = require('../api/teamResolver');
 const { getCurrentInningsScore } = require('../helpers/scoreParser');
 const { formatScore } = require('../helpers/matchHelpers');
 const { sweepOrphanedTricks } = require('../db/wicketTrickStore');
+const { pruneScorecardCache } = require('../api/scorecard');
+const { pruneSettledKeys } = require('../db/scorecardTrickStore');
 const { sendTelegramReply, sendTestScoreSummary } = require('../services/telegram');
 
 // ── Strategies ──────────────────────────────────────────
 const { handleFirstOverWicket } = require('../strategies/firstOverWicket');
 const { handleWicketTrickCheck } = require('../strategies/wicketTrick');
 const { handleOverRunsTrick } = require('../strategies/overRunsTrick');
-const { detectSecondOverWicket, checkSecondOverWicketTrick } = require('../strategies/secondOverWicket');
 const { handleDeathOversWicketTrick } = require('../strategies/deathOversWicket');
+const { handleScorecardTricks } = require('../strategies/scorecardTricks');
 
 const { POLL_INTERVAL_MS, MAX_POLL_INTERVAL_MS, TEST_MODE, TEST_SEND_EVERY } = require('../config');
 const logger = require('../lib/logger');
@@ -95,16 +97,14 @@ async function tick() {
         logger.error(`Error in handleOverRunsTrick for match ${id}:`, err);
       });
 
-      detectSecondOverWicket(id, score, match).catch((err) => {
-        logger.error(`Error in detectSecondOverWicket for match ${id}:`, err);
-      });
-
-      checkSecondOverWicketTrick(id, score, match).catch((err) => {
-        logger.error(`Error in checkSecondOverWicketTrick for match ${id}:`, err);
-      });
-
       handleDeathOversWicketTrick(id, score, match).catch((err) => {
         logger.error(`Error in handleDeathOversWicketTrick for match ${id}:`, err);
+      });
+
+      // Scorecard tricks (captain / keeper / openers) — fetches the full
+      // scorecard only when one of its tricks is actually outstanding.
+      handleScorecardTricks(id, score, match).catch((err) => {
+        logger.error(`Error in handleScorecardTricks for match ${id}:`, err);
       });
 
       // First over wicket detection + alert (awaited for sequential flow)
@@ -130,7 +130,11 @@ async function tick() {
     }
 
     // Every 150 polls (~5 minutes at 2s interval), sweep orphaned tricks
+    // and drop cached state for matches that have dropped off the live list.
     if (pollCount % 150 === 0) {
+      pruneScorecardCache(matchIds);
+      pruneSettledKeys(matchIds);
+
       sweepOrphanedTricks(matchIds, sendTelegramReply).catch((err) => {
         logger.error('Error during orphaned tricks sweep:', err);
       });

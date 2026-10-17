@@ -3,7 +3,7 @@
  * Utility functions for match state analysis.
  */
 
-const { MATCH_FINISHED_KEYWORDS, T20_FORMAT_KEYWORDS } = require('../config');
+const { MATCH_FINISHED_KEYWORDS, T20_FORMAT_KEYWORDS, ODI_FORMAT_KEYWORDS } = require('../config');
 const { parseScore } = require('./scoreParser');
 const logger = require('../lib/logger');
 
@@ -40,6 +40,15 @@ function isT20Match(match) {
 }
 
 /**
+ * Helper to check if a match is an ODI / one-day fixture.
+ */
+function isODIMatch(match) {
+  if (!match.fo) return false;
+  const fo = match.fo.toLowerCase();
+  return ODI_FORMAT_KEYWORDS.some(kw => fo.includes(kw));
+}
+
+/**
  * Format a score string for display.
  */
 function formatScore(match) {
@@ -57,4 +66,4 @@ function formatScore(match) {
   return `${parts[0]}  vs  ${parts[1]}`;
 }
 
-module.exports = { isMatchFinished, isT20Match, formatScore };
+module.exports = { isMatchFinished, isT20Match, isODIMatch, formatScore };
