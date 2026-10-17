@@ -20,6 +20,7 @@ const { getScorecard } = require('../api/scorecard');
 const { resolvePlayerNames } = require('../api/playerResolver');
 const { resolveTeamName } = require('../api/teamResolver');
 const { findInnings } = require('../helpers/scorecardParser');
+const { parseScore } = require('../helpers/scoreParser');
 const rules = require('../helpers/scorecardTrickRules');
 const { isT20Match, isODIMatch, isMatchFinished } = require('../helpers/matchHelpers');
 const { enrichedMatchLabel } = require('../helpers/matchFilter');
@@ -140,7 +141,7 @@ async function outstandingTricks(matchId, score, match) {
   const odi = isODIMatch(match);
   if (!t20 && !odi) return [];
 
-  const firstInningsComplete = score.innings === 2 || isMatchFinished(match);
+  const firstInningsComplete = score.innings === 2;
   const candidates = [];
 
   for (const trick of TRICKS) {
@@ -163,6 +164,20 @@ async function outstandingTricks(matchId, score, match) {
     if (!settled) outstanding.push(candidate);
   }
   return outstanding;
+}
+
+/**
+ * Sanity-check the scorecard's innings ordering against the live feed.
+ * Once the 1st innings is complete the feed's `j` field is frozen, so the
+ * scorecard's first innings must agree with it. If they disagree, the
+ * scorecard is not ordered the way we assume and we must not report a
+ * "1st innings" trick against the wrong team.
+ */
+function firstInningsAgreesWithFeed(scorecard, match) {
+  const feedFirst = parseScore(match.j);
+  if (!feedFirst || !scorecard[0]) return true;
+  return scorecard[0].runs === feedFirst.runs
+    && scorecard[0].wickets === feedFirst.wickets;
 }
 
 /**
@@ -230,7 +245,12 @@ async function evaluateTrick({ trick, innings: inningsNo }, matchId, scorecard, 
  * Entry point — called once per live match per poll tick.
  */
 async function handleScorecardTricks(matchId, score, match) {
-  const outstanding = await outstandingTricks(matchId, score, match);
+  // A finished match lingers in the live feed. These tricks test a lasting
+  // state rather than a moment, so without this guard every completed match
+  // still in the feed would alert again on the next process start.
+  if (isMatchFinished(match)) return;
+
+  let outstanding = await outstandingTricks(matchId, score, match);
   if (outstanding.length === 0) return;
 
   if (processing.has(matchId)) return;
@@ -239,6 +259,16 @@ async function handleScorecardTricks(matchId, score, match) {
   try {
     const scorecard = await getScorecard(matchId);
     if (!scorecard) return;
+
+    if (!firstInningsAgreesWithFeed(scorecard, match)) {
+      logger.warn(
+        `Scorecard for match ${matchId} disagrees with the live feed on the 1st innings ` +
+        `(scorecard ${scorecard[0].runs}/${scorecard[0].wickets}, feed ${match.j}) — ` +
+        `skipping the 1st-innings tricks.`
+      );
+      outstanding = outstanding.filter(c => c.trick.scope !== 'FIRST_INNINGS_END');
+      if (outstanding.length === 0) return;
+    }
 
     // Resolved once per tick and shared by every trick, rather than per alert.
     const context = await enrichedMatchLabel(matchId, match);
