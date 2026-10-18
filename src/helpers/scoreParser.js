@@ -8,7 +8,7 @@
  *     e.g. 7.2 = 7 full overs + 2 balls = 44 balls total.
  */
 
-const SCORE_REGEX = /^(\d+)\/(\d+)\((\d+\.\d+)/;
+const SCORE_REGEX = /^(\d+)\/(\d+)\((\d+(?:\.\d+)?)/;
 
 /**
  * Convert an overs value (e.g. 14.2) to total balls bowled.

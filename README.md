@@ -13,7 +13,7 @@ Real-time **Telegram** notifications for live cricket match events — first-ove
 | **Captain Top Scorer** | T20 | 1st | 1st innings ends and no other batter out-scored the captain | trick |
 | **Keeper Not Out** | T20 + ODI | 1st | 1st innings ends with the wicketkeeper unbeaten | trick |
 | **Keeper Top Scorer** | T20 + ODI | 1st | 1st innings ends and no other batter out-scored the keeper | trick |
-| **Openers High SR** | ODI | both | both openers are out and at least one struck at 101+ (both strike rates are reported) | trick |
+| **Opener High SR** | ODI | 1st | an opener is dismissed with SR 101+ (checked directly upon out, without waiting for both) | trick |
 | **Captain Out Slow** | T20 | both | the captain is dismissed below 100 SR having faced 10+ balls | trick |
 
 A joint-highest score still counts as top-scoring. Every trick is evaluated **once** per match

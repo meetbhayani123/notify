@@ -9,7 +9,7 @@
  *   CAPTAIN_TOP_SCORER       — T20, end of 1st innings: nobody out-scored the captain
  *   KEEPER_NOT_OUT          — T20 + ODI, end of 1st innings: keeper finished not out
  *   KEEPER_TOP_SCORER       — T20 + ODI, end of 1st innings: nobody out-scored the keeper
- *   OPENERS_HIGH_SR         — ODI, either innings: both openers out, one struck at 101+
+ *   OPENER_HIGH_SR          — ODI, 1st innings: opener dismissed with SR 101+
  *   CAPTAIN_CHEAP_DISMISSAL — T20, either innings: captain out, SR under 100 off 10+ balls
  */
 
@@ -89,8 +89,36 @@ function keeperNotOut(innings) {
 }
 
 /**
- * T3 — ODI, either innings: both opening batters are out; report both their
- * strike rates and qualify when at least one struck at OPENER_HIGH_SR_MIN or better.
+ * T3 — ODI, 1st innings: check an opening batter upon dismissal.
+ * Qualifies directly when the opener is out and struck at OPENER_HIGH_SR_MIN or better,
+ * without waiting for both openers to be dismissed.
+ *
+ * @param {object} innings — parsed innings object
+ * @param {number} openerIndex — 0 for first opener, 1 for second opener
+ */
+function openerHighStrikeRate(innings, openerIndex = 0) {
+  const openers = innings.batters.slice(0, 2);
+  if (openers.length <= openerIndex) {
+    return NOT_EVALUABLE(`Opener #${openerIndex + 1} not on the scorecard yet`);
+  }
+  const opener = openers[openerIndex];
+  if (!opener || opener.didNotBat) {
+    return NOT_EVALUABLE(`Opener #${openerIndex + 1} has no figures yet`);
+  }
+  if (!opener.out) {
+    return NOT_EVALUABLE(`Opener #${openerIndex + 1} is still batting`);
+  }
+
+  return {
+    evaluable: true,
+    qualifies: opener.strikeRate >= OPENER_HIGH_SR_MIN,
+    player: opener,
+    openerIndex
+  };
+}
+
+/**
+ * Legacy T3 rule for both openers.
  */
 function openersHighStrikeRate(innings) {
   const openers = innings.batters.slice(0, 2);
@@ -129,6 +157,7 @@ module.exports = {
   captainTopScorer,
   keeperTopScorer,
   keeperNotOut,
+  openerHighStrikeRate,
   openersHighStrikeRate,
   captainCheapDismissal,
   topScoreExcluding

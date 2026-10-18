@@ -12,6 +12,7 @@
 
 const axios = require('axios');
 const { TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_TRICK_CHAT_ID } = require('../config');
+const { parseOversToTotalBalls } = require('../helpers/scoreParser');
 const logger = require('../lib/logger');
 
 // ── Helpers ─────────────────────────────────────────────
@@ -147,7 +148,9 @@ async function sendTrickNotifyAlert({ matchLabel, innings, battingTeam, runs, th
 // ── Death Overs Wicket alert → trick channel ────────────
 async function sendDeathOversWicketAlert({ matchLabel, battingTeam, runs, wickets, overs, target, firstInningsRuns, firstInningsWickets, matchInfo }) {
   const runsNeeded = target ? target - runs : null;
-  const oversLeft  = (20 - overs).toFixed(1);
+  const ballsBowled = parseOversToTotalBalls(overs);
+  const ballsLeft = Math.max(0, 120 - ballsBowled);
+  const oversLeft = `${Math.floor(ballsLeft / 6)}.${ballsLeft % 6}`;
   const matchUrl   = matchInfo?.matchUrl || null;
 
   const lines = [

@@ -5,7 +5,7 @@
  *   CAPTAIN_TOP_SCORER       T20        end of 1st innings — nobody out-scored the captain
  *   KEEPER_NOT_OUT           T20 + ODI  end of 1st innings — the keeper finished not out
  *   KEEPER_TOP_SCORER        T20 + ODI  end of 1st innings — nobody out-scored the keeper
- *   OPENERS_HIGH_SR          ODI        either innings — both openers out, one struck at 101+
+ *   OPENER_HIGH_SR           ODI        1st innings — opener dismissed at 101+ SR (checked directly upon out)
  *   CAPTAIN_CHEAP_DISMISSAL  T20        either innings — captain out under 100 SR off 10+ balls
  *
  * All five alerts go to the dedicated trick channel.
@@ -96,20 +96,36 @@ const TRICKS = [
     })
   },
   {
-    id: 'OPENERS_HIGH_SR',
+    id: 'OPENER_1_HIGH_SR',
     scope: 'CURRENT',
+    firstInningsOnly: true,
     formats: { t20: false, odi: true },
-    minWickets: 2,
-    rule: rules.openersHighStrikeRate,
-    keysOf: (r) => r.openers.map(o => o.key),
+    minWickets: 1,
+    rule: (innings) => rules.openerHighStrikeRate(innings, 0),
+    keysOf: (r) => [r.player.key],
     build: (r, names) => ({
-      title: `⚡ *BOTH OPENERS OUT — HIGH SR*`,
-      headline: r.highStrikers
-        .map(o => `*${escapeMarkdown(names[o.key])}* struck at *${sr(o)}*`)
-        .join('  ·  '),
+      title: `⚡ *OPENER OUT — HIGH SR (1ST INN)*`,
+      headline: `*${escapeMarkdown(names[r.player.key])}* (Opener) out for ${fig(r.player)}  ·  SR *${sr(r.player)}*`,
       detailLines: [
-        ...r.openers.map(o => `📊 ${escapeMarkdown(names[o.key])} ${o.runs} (${o.balls})  ·  SR ${sr(o)}`),
-        `🎯 Over ${OPENER_HIGH_SR_MIN - 1} SR: ${r.highStrikers.map(o => escapeMarkdown(names[o.key])).join(', ')}`
+        `⚡ Dismissed at SR ${OPENER_HIGH_SR_MIN - 1}+ in the 1st innings`,
+        `🧮 ${r.player.balls} balls faced  ·  ${r.player.fours}x4  ${r.player.sixes}x6`
+      ]
+    })
+  },
+  {
+    id: 'OPENER_2_HIGH_SR',
+    scope: 'CURRENT',
+    firstInningsOnly: true,
+    formats: { t20: false, odi: true },
+    minWickets: 1,
+    rule: (innings) => rules.openerHighStrikeRate(innings, 1),
+    keysOf: (r) => [r.player.key],
+    build: (r, names) => ({
+      title: `⚡ *OPENER OUT — HIGH SR (1ST INN)*`,
+      headline: `*${escapeMarkdown(names[r.player.key])}* (Opener) out for ${fig(r.player)}  ·  SR *${sr(r.player)}*`,
+      detailLines: [
+        `⚡ Dismissed at SR ${OPENER_HIGH_SR_MIN - 1}+ in the 1st innings`,
+        `🧮 ${r.player.balls} balls faced  ·  ${r.player.fours}x4  ${r.player.sixes}x6`
       ]
     })
   },
@@ -146,6 +162,8 @@ async function outstandingTricks(matchId, score, match) {
 
   for (const trick of TRICKS) {
     if (!(t20 ? trick.formats.t20 : trick.formats.odi)) continue;
+
+    if (trick.firstInningsOnly && score.innings !== 1) continue;
 
     if (trick.scope === 'FIRST_INNINGS_END') {
       if (!firstInningsComplete) continue;
