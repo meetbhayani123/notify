@@ -173,7 +173,10 @@ async function outstandingTricks(matchId, score, match) {
 
     // 'CURRENT' — needs enough wickets down for the rule to be decidable.
     if (trick.minWickets && score.wickets < trick.minWickets) continue;
-    candidates.push({ trick, innings: score.innings });
+    // A first-innings-only trick always targets innings 1, never whichever
+    // innings happens to be live. The guard above already requires
+    // score.innings === 1; naming it here keeps the two from drifting apart.
+    candidates.push({ trick, innings: trick.firstInningsOnly ? 1 : score.innings });
   }
 
   const outstanding = [];
@@ -192,6 +195,12 @@ async function outstandingTricks(matchId, score, match) {
  * "1st innings" trick against the wrong team.
  */
 function firstInningsAgreesWithFeed(scorecard, match) {
+  // With a single innings on the card there is nothing to mis-order: entry 0
+  // is the innings being bowled. Checking scores here would also fight the
+  // scorecard cache, which can briefly lag the live feed mid-innings.
+  if (scorecard.length < 2) return true;
+
+  // Both innings exist, so the 1st innings is frozen and `j` must agree.
   const feedFirst = parseScore(match.j);
   if (!feedFirst || !scorecard[0]) return true;
   return scorecard[0].runs === feedFirst.runs
@@ -282,9 +291,9 @@ async function handleScorecardTricks(matchId, score, match) {
       logger.warn(
         `Scorecard for match ${matchId} disagrees with the live feed on the 1st innings ` +
         `(scorecard ${scorecard[0].runs}/${scorecard[0].wickets}, feed ${match.j}) — ` +
-        `skipping the 1st-innings tricks.`
+        `skipping every 1st-innings trick.`
       );
-      outstanding = outstanding.filter(c => c.trick.scope !== 'FIRST_INNINGS_END');
+      outstanding = outstanding.filter(c => c.innings !== 1);
       if (outstanding.length === 0) return;
     }
 
