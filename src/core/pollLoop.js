@@ -18,7 +18,7 @@ const { handleFirstOverWicket } = require('../strategies/firstOverWicket');
 const { handleWicketTrickCheck } = require('../strategies/wicketTrick');
 const { handleOverRunsTrick } = require('../strategies/overRunsTrick');
 const { handleDeathOversWicketTrick } = require('../strategies/deathOversWicket');
-const { handleScorecardTricks } = require('../strategies/scorecardTricks');
+const { handleScorecardTricks, pruneWicketTracking } = require('../strategies/scorecardTricks');
 
 const { POLL_INTERVAL_MS, MAX_POLL_INTERVAL_MS, TEST_MODE, TEST_SEND_EVERY } = require('../config');
 const logger = require('../lib/logger');
@@ -134,6 +134,7 @@ async function tick() {
     if (pollCount % 150 === 0) {
       pruneScorecardCache(matchIds);
       pruneSettledKeys(matchIds);
+      pruneWicketTracking(matchIds);
 
       sweepOrphanedTricks(matchIds, sendTelegramReply).catch((err) => {
         logger.error('Error during orphaned tricks sweep:', err);

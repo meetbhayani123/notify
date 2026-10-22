@@ -31,6 +31,22 @@ const logger = require('../lib/logger');
 
 const processing = new Set();
 
+// Last wicket count seen per match/innings. A wicket that has just fallen
+// bypasses the scorecard cache, so a dismissal alerts on the next tick rather
+// than whenever the 20s TTL happens to expire.
+const lastWicketCount = new Map();
+
+/**
+ * Record this tick's wicket count and report whether one just fell.
+ * Called once per live match per tick so the tracking stays continuous.
+ */
+function wicketJustFell(matchId, score) {
+  const key = `${matchId}_${score.innings}`;
+  const previous = lastWicketCount.get(key);
+  lastWicketCount.set(key, score.wickets);
+  return previous !== undefined && score.wickets > previous;
+}
+
 /** Render "87 (42)". */
 const fig = (b) => `*${b.runs}* (${b.balls})`;
 /** Render a strike rate to two places. */
@@ -277,6 +293,9 @@ async function handleScorecardTricks(matchId, score, match) {
   // still in the feed would alert again on the next process start.
   if (isMatchFinished(match)) return;
 
+  // Tracked every tick, before any early return, so transitions are not missed.
+  const freshWicket = wicketJustFell(matchId, score);
+
   let outstanding = await outstandingTricks(matchId, score, match);
   if (outstanding.length === 0) return;
 
@@ -284,7 +303,8 @@ async function handleScorecardTricks(matchId, score, match) {
   processing.add(matchId);
 
   try {
-    const scorecard = await getScorecard(matchId);
+    // A dismissal we have not seen yet means the cached card is already stale.
+    const scorecard = await getScorecard(matchId, { force: freshWicket });
     if (!scorecard) return;
 
     if (!firstInningsAgreesWithFeed(scorecard, match)) {
@@ -312,4 +332,14 @@ async function handleScorecardTricks(matchId, score, match) {
   }
 }
 
-module.exports = { handleScorecardTricks, TRICKS };
+/**
+ * Drop wicket tracking for matches that are no longer live.
+ */
+function pruneWicketTracking(activeMatchIds) {
+  const active = new Set(activeMatchIds);
+  for (const key of lastWicketCount.keys()) {
+    if (!active.has(key.split('_')[0])) lastWicketCount.delete(key);
+  }
+}
+
+module.exports = { handleScorecardTricks, pruneWicketTracking, TRICKS };

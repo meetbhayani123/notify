@@ -118,25 +118,6 @@ function openerHighStrikeRate(innings, openerIndex = 0) {
 }
 
 /**
- * Legacy T3 rule for both openers.
- */
-function openersHighStrikeRate(innings) {
-  const openers = innings.batters.slice(0, 2);
-  if (openers.length < 2) return NOT_EVALUABLE('Fewer than two batters on the scorecard');
-  if (openers.some(b => b.didNotBat)) return NOT_EVALUABLE('Openers have no figures yet');
-  if (!openers.every(b => b.out)) return NOT_EVALUABLE('Both openers are not out yet');
-
-  const high = openers.filter(b => b.strikeRate >= OPENER_HIGH_SR_MIN);
-
-  return {
-    evaluable: true,
-    qualifies: high.length > 0,
-    openers,
-    highStrikers: high
-  };
-}
-
-/**
  * T4 — T20, either innings: the captain is out having struck below
  * CAPTAIN_CHEAP_MAX_SR off at least CAPTAIN_CHEAP_MIN_BALLS balls.
  */
@@ -158,7 +139,6 @@ module.exports = {
   keeperTopScorer,
   keeperNotOut,
   openerHighStrikeRate,
-  openersHighStrikeRate,
   captainCheapDismissal,
   topScoreExcluding
 };
