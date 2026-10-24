@@ -15,12 +15,15 @@ Real-time **Telegram** notifications for live cricket match events — first-ove
 | **Keeper Top Scorer** | T20 + ODI | 1st | 1st innings ends and no other batter out-scored the keeper | trick |
 | **Opener High SR** | ODI | 1st | an opener is dismissed with SR 101+ (checked directly upon out, without waiting for both) | trick |
 | **Captain Out Slow** | T20 | both | the captain is dismissed below 100 SR having faced 10+ balls | trick |
-| **Tight Over Wicket** | T20 | 2nd | a completed over took a wicket **and** went for 5 runs or fewer | trick |
+| **Tight Over Wicket** | T20 | 2nd | an over took a wicket and went for ≤5 runs — **or** a wicket falls in the over straight after a wicket over that went for more than 5 | trick |
 
 A joint-highest score still counts as top-scoring. Every trick is evaluated **once** per match
 and innings and recorded in MongoDB, so restarts never duplicate an alert. Tight Over Wicket is
 the exception: it judges each over separately, so it can fire several times in an innings, and
-is deduplicated per over instead.
+is deduplicated per over instead. Its two paths are spelled out in
+[`src/helpers/tightOverRule.js`](src/helpers/tightOverRule.js): a tight wicket over alerts on
+itself, and an expensive wicket over instead arms the following over, where a wicket alerts
+whatever that over goes for.
 
 ## How It Works
 
@@ -110,6 +113,7 @@ notify/
     │   ├── scorecardParser.js       ← Scorecard payload decoding (pure)
     │   ├── scorecardTrickRules.js   ← Scorecard trick rules (pure, no I/O)
     │   ├── overParser.js            ← Per-over history decoding (pure)
+    │   ├── tightOverRule.js         ← Tight-over wicket rule (pure, no I/O)
     │   └── matchFilter.js           ← Live match filtering, series muting, labels
     ├── core/
     │   ├── pollLoop.js       ← Main polling loop + strategy orchestration

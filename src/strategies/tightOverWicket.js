@@ -1,25 +1,23 @@
 /**
  * strategies/tightOverWicket.js
- * "Tight over wicket" trick — T20, 2nd innings only.
+ * "Tight over wicket" trick — T20, 2nd innings only. One trick, two ways in:
  *
- * Every completed over is judged on its own:
- *   a wicket fell in the over AND the over went for TIGHT_OVER_MAX_RUNS or fewer
- *     → alert
+ *   A — an over took a wicket and finished having gone for TIGHT_OVER_MAX_RUNS
+ *       or fewer → alert on that over.
+ *   B — an over took a wicket but went for more than that, so the very next
+ *       over is watched: a wicket there alerts too, whatever it goes for.
  *
- * An over that does not qualify stops nothing; the next over is judged the same
- * way, so the trick can fire several times in one innings — once per over.
+ * The rule itself lives in helpers/tightOverRule.js. This module supplies it
+ * with data and turns its verdict into an alert.
  *
- * The live-matches feed carries no per-over detail, so the per-over figures come
- * from the match-state endpoint, requested only when an over has just completed.
- *
- * An over is judged only once a LATER over appears in the API's rolling window,
- * which is what proves the over finished and its runs are final. The cost is
- * that a qualifying final over of an innings is never reported — by then there
- * is no following over to act on, so nothing useful is lost.
+ * The live-matches feed carries no per-over detail, so the figures come from
+ * the match-state endpoint. It is asked for only when something that could
+ * change the verdict has happened — an over finished, or a wicket fell —
+ * which holds it to roughly one request per over plus one per wicket.
  */
 
 const { getOverHistory } = require('../api/overHistory');
-const { findOver } = require('../helpers/overParser');
+const { evaluateOver } = require('../helpers/tightOverRule');
 const { resolveTeamName } = require('../api/teamResolver');
 const { isT20Match, isMatchFinished } = require('../helpers/matchHelpers');
 const { enrichedMatchLabel } = require('../helpers/matchFilter');
@@ -29,61 +27,86 @@ const { TIGHT_OVER_MAX_RUNS } = require('../config');
 const logger = require('../lib/logger');
 
 const processing = new Set();
-// `${matchId}_${innings}` → the completed-over count we last forced a fetch for,
-// so a freshly finished over bypasses the cache exactly once.
-const lastForcedOver = new Map();
+// `${matchId}_${innings}` → { completedOvers, wickets } as last seen in the feed
+const lastSeen = new Map();
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /**
- * Judge one completed over and alert when it qualifies.
+ * Has anything happened that could change a verdict since the last tick?
+ * An over finishing can settle path A; a wicket falling can settle path B.
  */
-async function judgeOver(matchId, innings, entry, match) {
-  const qualifies = entry.wickets >= 1 && entry.runs <= TIGHT_OVER_MAX_RUNS;
-  const battingTeam = await resolveTeamName(entry.battingTeamKey);
+function somethingChanged(matchId, score, completedOvers) {
+  const key = `${matchId}_${score.innings}`;
+  const previous = lastSeen.get(key);
+  lastSeen.set(key, { completedOvers, wickets: score.wickets });
 
-  if (!qualifies) {
+  if (!previous) return true; // first sight of this innings
+  return completedOvers > previous.completedOvers || score.wickets > previous.wickets;
+}
+
+/**
+ * Turn a qualifying verdict into an alert, and record the outcome either way.
+ */
+async function reportOver(matchId, innings, verdict, match) {
+  const { over, previousOver, trigger } = verdict;
+  const battingTeam = await resolveTeamName(over.battingTeamKey);
+
+  if (!verdict.qualifies) {
     logger.info(
-      `🎯 [TIGHT OVER SKIPPED] Match ${matchId} over ${entry.over} — ` +
-      `${entry.runs} run(s), ${entry.wickets} wicket(s).`
+      `🎯 [TIGHT OVER SKIPPED] Match ${matchId} over ${over.over} — ` +
+      `${plural(over.runs, 'run')}, ${plural(over.wickets, 'wicket')}.`
     );
     await saveOverOutcome({
-      matchId, innings, over: entry.over, battingTeam,
-      runs: entry.runs, wickets: entry.wickets, status: 'SKIPPED'
+      matchId, innings, over: over.over, battingTeam,
+      runs: over.runs, wickets: over.wickets, status: 'SKIPPED'
     });
     return;
   }
 
   const { label, matchInfo } = await enrichedMatchLabel(matchId, match);
-  const wicketWord = entry.wickets === 1 ? 'wicket' : 'wickets';
+  const afterTheExpensiveOver = trigger === 'WICKET_AFTER_EXPENSIVE_OVER';
+
+  const headline = afterTheExpensiveOver
+    ? `*${battingTeam}*  ·  wicket in over *${over.over}*, straight after over *${previousOver.over}*`
+    : `*${battingTeam}*  ·  over *${over.over}* went for *${over.runs}* with ${plural(over.wickets, 'wicket')}`;
+
+  const detailLines = afterTheExpensiveOver
+    ? [
+        `⚡ Over ${previousOver.over} took ${plural(previousOver.wickets, 'wicket')} but went for ${previousOver.runs}`,
+        `🎯 Wicket in the very next over${over.runs !== null ? ` — ${plural(over.runs, 'run')} so far` : ''}`
+      ]
+    : [
+        `⚡ Wicket fell and the over went for ${TIGHT_OVER_MAX_RUNS} or fewer`
+      ];
+
+  if (over.scoreAfter) {
+    detailLines.push(`📊 Score: *${over.scoreAfter.runs}/${over.scoreAfter.wickets}*`);
+  }
 
   logger.success(
-    `🎯 [TIGHT OVER WICKET] Match ${label} over ${entry.over} — ` +
-    `${entry.runs} run(s) and ${entry.wickets} ${wicketWord}. ALERT!`
+    `🎯 [TIGHT OVER WICKET — ${trigger}] Match ${label} over ${over.over} — ` +
+    `${plural(over.runs, 'run')}, ${plural(over.wickets, 'wicket')}. ALERT!`
   );
 
   try {
     await sendTrickAlert({
       title: `🎯 *TIGHT OVER — WICKET*`,
-      headline: `*${battingTeam}*  ·  over *${entry.over}* went for *${entry.runs}* with *${entry.wickets}* ${wicketWord}`,
-      detailLines: [
-        `⚡ Wicket fell and the over went for ${TIGHT_OVER_MAX_RUNS} or fewer`,
-        entry.scoreAfter
-          ? `📊 After the over: *${entry.scoreAfter.runs}/${entry.scoreAfter.wickets}*`
-          : null
-      ],
+      headline,
+      detailLines,
       matchLabel: label,
       innings,
       matchInfo
     });
-
     await saveOverOutcome({
-      matchId, innings, over: entry.over, battingTeam,
-      runs: entry.runs, wickets: entry.wickets, status: 'NOTIFIED'
+      matchId, innings, over: over.over, battingTeam,
+      runs: over.runs, wickets: over.wickets, status: 'NOTIFIED'
     });
   } catch (err) {
-    logger.error(`Telegram send failed for tight-over wicket (match ${matchId} over ${entry.over}):`, err);
+    logger.error(`Telegram send failed for tight-over wicket (match ${matchId} over ${over.over}):`, err);
     await saveOverOutcome({
-      matchId, innings, over: entry.over, battingTeam,
-      runs: entry.runs, wickets: entry.wickets, status: 'SEND_FAILED'
+      matchId, innings, over: over.over, battingTeam,
+      runs: over.runs, wickets: over.wickets, status: 'SEND_FAILED'
     });
   }
 }
@@ -101,23 +124,22 @@ async function handleTightOverWicket(matchId, score, match) {
   const completedOvers = Math.floor(score.balls / 6);
   if (completedOvers < 1) return;
 
-  // The latest completed over, plus one over of slack so a missed tick or a
-  // brief API outage does not lose an over outright.
-  const pending = [];
-  for (let over = Math.max(1, completedOvers - 1); over <= completedOvers; over++) {
-    if (!(await isOverEvaluated(matchId, score.innings, over))) pending.push(over);
+  if (!somethingChanged(matchId, score, completedOvers)) return;
+
+  // The over just finished (path A), the one being bowled (path B), and one
+  // over of slack so a missed tick does not lose an over outright.
+  const candidates = [];
+  for (let over = Math.max(1, completedOvers - 1); over <= completedOvers + 1; over++) {
+    if (!(await isOverEvaluated(matchId, score.innings, over))) candidates.push(over);
   }
-  if (pending.length === 0) return;
+  if (candidates.length === 0) return;
 
   const stateKey = `${matchId}_${score.innings}`;
   if (processing.has(stateKey)) return;
   processing.add(stateKey);
 
   try {
-    const forceFetch = completedOvers > (lastForcedOver.get(stateKey) || 0);
-    if (forceFetch) lastForcedOver.set(stateKey, completedOvers);
-
-    const result = await getOverHistory(matchId, { force: forceFetch });
+    const result = await getOverHistory(matchId, { force: true });
     if (!result || result.history.length === 0) return;
 
     // Cross-check: the window must belong to a chase that is actually under way.
@@ -126,13 +148,10 @@ async function handleTightOverWicket(matchId, score, match) {
       return;
     }
 
-    const latestInWindow = Math.max(...result.history.map(o => o.over));
-
-    for (const over of pending) {
-      const entry = findOver(result.history, over);
-      if (!entry) continue;                 // older than the rolling window
-      if (latestInWindow <= over) continue; // no following over yet: not proven finished
-      await judgeOver(matchId, score.innings, entry, match);
+    for (const over of candidates) {
+      const verdict = evaluateOver(result.history, over);
+      if (!verdict.evaluable) continue; // not settled — looked at again next time
+      await reportOver(matchId, score.innings, verdict, match);
     }
   } catch (err) {
     logger.error(`Error during tight-over wicket check for match ${matchId}:`, err);
@@ -146,8 +165,8 @@ async function handleTightOverWicket(matchId, score, match) {
  */
 function pruneTightOverState(activeMatchIds) {
   const active = new Set(activeMatchIds);
-  for (const key of lastForcedOver.keys()) {
-    if (!active.has(key.split('_')[0])) lastForcedOver.delete(key);
+  for (const key of lastSeen.keys()) {
+    if (!active.has(key.split('_')[0])) lastSeen.delete(key);
   }
 }
 
