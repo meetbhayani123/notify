@@ -11,6 +11,8 @@ const { formatScore } = require('../helpers/matchHelpers');
 const { sweepOrphanedTricks } = require('../db/wicketTrickStore');
 const { pruneScorecardCache } = require('../api/scorecard');
 const { pruneSettledKeys } = require('../db/scorecardTrickStore');
+const { pruneOverHistoryCache } = require('../api/overHistory');
+const { pruneTightOverKeys } = require('../db/tightOverTrickStore');
 const { sendTelegramReply, sendTestScoreSummary } = require('../services/telegram');
 
 // ── Strategies ──────────────────────────────────────────
@@ -19,6 +21,7 @@ const { handleWicketTrickCheck } = require('../strategies/wicketTrick');
 const { handleOverRunsTrick } = require('../strategies/overRunsTrick');
 const { handleDeathOversWicketTrick } = require('../strategies/deathOversWicket');
 const { handleScorecardTricks, pruneWicketTracking } = require('../strategies/scorecardTricks');
+const { handleTightOverWicket, pruneTightOverState } = require('../strategies/tightOverWicket');
 
 const { POLL_INTERVAL_MS, MAX_POLL_INTERVAL_MS, TEST_MODE, TEST_SEND_EVERY } = require('../config');
 const logger = require('../lib/logger');
@@ -107,6 +110,12 @@ async function tick() {
         logger.error(`Error in handleScorecardTricks for match ${id}:`, err);
       });
 
+      // Tight over wicket (T20 2nd innings) — asks for per-over detail only
+      // when an over has just completed.
+      handleTightOverWicket(id, score, match).catch((err) => {
+        logger.error(`Error in handleTightOverWicket for match ${id}:`, err);
+      });
+
       // First over wicket detection + alert (awaited for sequential flow)
       await handleFirstOverWicket(id, score, match);
     }
@@ -135,6 +144,9 @@ async function tick() {
       pruneScorecardCache(matchIds);
       pruneSettledKeys(matchIds);
       pruneWicketTracking(matchIds);
+      pruneOverHistoryCache(matchIds);
+      pruneTightOverKeys(matchIds);
+      pruneTightOverState(matchIds);
 
       sweepOrphanedTricks(matchIds, sendTelegramReply).catch((err) => {
         logger.error('Error during orphaned tricks sweep:', err);

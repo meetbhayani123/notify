@@ -25,7 +25,7 @@ const rules = require('../helpers/scorecardTrickRules');
 const { isT20Match, isODIMatch, isMatchFinished } = require('../helpers/matchHelpers');
 const { enrichedMatchLabel } = require('../helpers/matchFilter');
 const { isTrickSettled, saveTrickOutcome } = require('../db/scorecardTrickStore');
-const { sendScorecardTrickAlert, escapeMarkdown } = require('../services/telegram');
+const { sendTrickAlert, escapeMarkdown } = require('../services/telegram');
 const { OPENER_HIGH_SR_MIN, CAPTAIN_CHEAP_MAX_SR, CAPTAIN_CHEAP_MIN_BALLS } = require('../config');
 const logger = require('../lib/logger');
 
@@ -263,7 +263,7 @@ async function evaluateTrick({ trick, innings: inningsNo }, matchId, scorecard, 
   logger.success(`📋 [${trick.id}] Match ${label} innings ${inningsNo} — ${playerName}. ALERT!`);
 
   try {
-    await sendScorecardTrickAlert({
+    await sendTrickAlert({
       title, headline, detailLines,
       matchLabel: label,
       innings: inningsNo,

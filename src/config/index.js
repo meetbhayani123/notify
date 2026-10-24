@@ -46,6 +46,10 @@ const OPENER_HIGH_SR_MIN = 101;
 const CAPTAIN_CHEAP_MAX_SR = 100;
 const CAPTAIN_CHEAP_MIN_BALLS = 10;
 
+// ── Tight Over Wicket Trick (T20, 2nd innings) ──────────
+// A wicket in an over that went for this many runs or fewer.
+const TIGHT_OVER_MAX_RUNS = 5;
+
 // ── Scorecard API ───────────────────────────────────────
 const SCORECARD_API_URL = process.env.SCORECARD_API_URL
   || 'https://api.goscorer.com/api/v3/getSC4';
@@ -53,6 +57,11 @@ const PLAYER_MAP_API_URL = process.env.PLAYER_MAP_API_URL
   || 'https://oc.crickapi.com/mapping/getHomeMapData';
 // Per-match scorecard cache, so repeated polls never hammer the API.
 const SCORECARD_CACHE_TTL_MS = 20_000;
+
+// Per-over history, from the same match-state endpoint the live page uses.
+const MATCH_STATE_API_URL = process.env.MATCH_STATE_API_URL
+  || 'https://api.goscorer.com/api/v3/getSV3';
+const OVER_HISTORY_CACHE_TTL_MS = 8_000;
 
 // ── Telegram ────────────────────────────────────────────
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -96,9 +105,12 @@ module.exports = {
   OPENER_HIGH_SR_MIN,
   CAPTAIN_CHEAP_MAX_SR,
   CAPTAIN_CHEAP_MIN_BALLS,
+  TIGHT_OVER_MAX_RUNS,
   SCORECARD_API_URL,
   PLAYER_MAP_API_URL,
   SCORECARD_CACHE_TTL_MS,
+  MATCH_STATE_API_URL,
+  OVER_HISTORY_CACHE_TTL_MS,
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID,
   TELEGRAM_TRICK_CHAT_ID,

@@ -15,9 +15,12 @@ Real-time **Telegram** notifications for live cricket match events — first-ove
 | **Keeper Top Scorer** | T20 + ODI | 1st | 1st innings ends and no other batter out-scored the keeper | trick |
 | **Opener High SR** | ODI | 1st | an opener is dismissed with SR 101+ (checked directly upon out, without waiting for both) | trick |
 | **Captain Out Slow** | T20 | both | the captain is dismissed below 100 SR having faced 10+ balls | trick |
+| **Tight Over Wicket** | T20 | 2nd | a completed over took a wicket **and** went for 5 runs or fewer | trick |
 
 A joint-highest score still counts as top-scoring. Every trick is evaluated **once** per match
-and innings and recorded in MongoDB, so restarts never duplicate an alert.
+and innings and recorded in MongoDB, so restarts never duplicate an alert. Tight Over Wicket is
+the exception: it judges each over separately, so it can fire several times in an innings, and
+is deduplicated per over instead.
 
 ## How It Works
 
@@ -36,6 +39,7 @@ All three endpoints are the ones crex.com itself calls:
 |---------|---------|------|
 | Live matches | `GET api.goscorer.com/api/v3/getLiveMatches` | `authorization: <CRICKET_API_JWT>` |
 | Full scorecard | `GET api.goscorer.com/api/v3/getSC4?key=<matchId>` | none |
+| Per-over history | `GET api.goscorer.com/api/v3/getSV3?key=<matchId>` | none |
 | Player names | `POST oc.crickapi.com/mapping/getHomeMapData`, header `type: liveparsing`, body `{"p":[keys],"s":[],"u":[],"v":[],"t":[],"lc":"en"}` | none |
 | Teams / series / venues / match slugs | scraped from the `app-root-state` JSON on `crex.com` | none |
 
@@ -43,6 +47,10 @@ The scorecard response is an array of innings. The fields this project relies on
 documented in [`src/helpers/scorecardParser.js`](src/helpers/scorecardParser.js) — most
 importantly `x` (`"<captainKey>/<wicketKeeperKey>"`) and `b` (the batting card in batting
 order, carrying runs, balls, boundaries and dismissal details).
+
+The match-state response carries `rb`, a rolling window of the most recent overs with their
+runs, wickets and ball-by-ball outcomes — detail the live-matches feed does not provide at
+all. See [`src/helpers/overParser.js`](src/helpers/overParser.js).
 
 ---
 
@@ -65,6 +73,7 @@ notify/
     ├── api/
     │   ├── poller.js         ← HTTP fetch of live matches
     │   ├── scorecard.js      ← Per-match scorecard fetch + TTL cache
+    │   ├── overHistory.js    ← Per-over history fetch + TTL cache
     │   ├── teamResolver.js   ← Team / series / venue / match-slug resolution
     │   ├── playerResolver.js ← Player key → name (Memory/DB/Web, negative cached)
     │   └── seriesRoutes.js   ← REST API used by the frontend
@@ -76,7 +85,8 @@ notify/
     │   ├── wicketTrick.js        ← Post-wicket trick tracker (Done/Fail)
     │   ├── overRunsTrick.js      ← 1st over runs threshold trick
     │   ├── deathOversWicket.js   ← 4 wickets down after 16 overs (T20)
-    │   └── scorecardTricks.js    ← Captain / keeper / openers tricks
+    │   ├── scorecardTricks.js    ← Captain / keeper / openers tricks
+    │   └── tightOverWicket.js    ← Wicket in an over that went for ≤5 (T20 2nd inn)
     ├── db/
     │   ├── connection.js            ← MongoDB connection + fallback flag
     │   ├── matchStateStore.js       ← Wicket state tracking CRUD
@@ -85,10 +95,12 @@ notify/
     │   ├── overRunsTrickStore.js    ← Over runs trick CRUD
     │   ├── deathOversWicketStore.js ← Death overs trick CRUD
     │   ├── scorecardTrickStore.js   ← Once-only bookkeeping for scorecard tricks
+    │   ├── tightOverTrickStore.js   ← Once-per-over bookkeeping for the tight-over trick
     │   └── models/
     │       ├── MatchState.js       ├── OverRunsTrick.js
     │       ├── FirstOverSession.js ├── DeathOversWicketTrick.js
     │       ├── WicketTrick.js      ├── ScorecardTrick.js
+    │       ├── TightOverTrick.js
     │       ├── SystemLog.js        ├── Team.js
     │       ├── Series.js           ├── Venue.js
     │       └── Player.js
@@ -97,6 +109,7 @@ notify/
     │   ├── scoreParser.js           ← Live score string parsing
     │   ├── scorecardParser.js       ← Scorecard payload decoding (pure)
     │   ├── scorecardTrickRules.js   ← Scorecard trick rules (pure, no I/O)
+    │   ├── overParser.js            ← Per-over history decoding (pure)
     │   └── matchFilter.js           ← Live match filtering, series muting, labels
     ├── core/
     │   ├── pollLoop.js       ← Main polling loop + strategy orchestration

@@ -178,11 +178,12 @@ async function sendDeathOversWicketAlert({ matchLabel, battingTeam, runs, wicket
   return data;
 }
 
-// ── Scorecard tricks → trick channel ────────────────────
+// ── Generic trick alert → trick channel ─────────────────
 /**
- * Generic sender for the scorecard-derived tricks (captain / keeper / openers).
- * The calling strategy supplies the headline and the detail lines; the layout,
- * context footer and quick links are shared with every other alert.
+ * Shared sender for the structured tricks (captain / keeper / openers /
+ * tight over). The calling strategy supplies the headline and the detail
+ * lines; the layout, context footer and quick links are shared with every
+ * other alert.
  *
  * @param {object} alert
  * @param {string} alert.title        — e.g. "👑 *CAPTAIN TOP SCORER*"
@@ -190,7 +191,7 @@ async function sendDeathOversWicketAlert({ matchLabel, battingTeam, runs, wicket
  * @param {string[]} alert.detailLines — body lines, already Markdown-escaped
  * @returns {Promise<number|null>} the sent message id
  */
-async function sendScorecardTrickAlert({ title, headline, detailLines = [], matchLabel, innings, matchInfo }) {
+async function sendTrickAlert({ title, headline, detailLines = [], matchLabel, innings, matchInfo }) {
   const matchUrl = matchInfo?.matchUrl || null;
 
   const footer = contextFooter(matchInfo);
@@ -235,6 +236,6 @@ module.exports = {
   sendTelegramReply,
   sendTrickNotifyAlert,
   sendDeathOversWicketAlert,
-  sendScorecardTrickAlert,
+  sendTrickAlert,
   sendTestScoreSummary
 };
