@@ -63,6 +63,25 @@ const MATCH_STATE_API_URL = process.env.MATCH_STATE_API_URL
   || 'https://api.goscorer.com/api/v3/getSV3';
 const OVER_HISTORY_CACHE_TTL_MS = 8_000;
 
+// ── Logging ─────────────────────────────────────────────
+// Only these levels are written to MongoDB; every level still prints to the
+// console. INFO / LIVE / DATABASE are deliberately absent: they are per-poll
+// chatter that costs an insert each and is never read back.
+// Set LOG_PERSIST_LEVELS to an empty string to stop persisting logs entirely.
+const LOG_PERSIST_LEVELS = (process.env.LOG_PERSIST_LEVELS ?? 'ERROR,WARN,SUCCESS')
+  .split(',')
+  .map(level => level.trim().toUpperCase())
+  .filter(Boolean);
+
+// MongoDB expires a persisted log once it reaches this age, so the collection
+// cannot grow without bound again.
+// NOTE: changing this after the TTL index exists needs the index dropped (or a
+// collMod) — MongoDB will not silently alter an index's expiry.
+const LOG_RETENTION_DAYS = Math.max(1, parseInt(process.env.LOG_RETENTION_DAYS, 10) || 30);
+
+// Keeps one bad stack trace from ballooning a single document.
+const LOG_MAX_ERROR_CHARS = 2000;
+
 // ── Telegram ────────────────────────────────────────────
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -111,6 +130,9 @@ module.exports = {
   SCORECARD_CACHE_TTL_MS,
   MATCH_STATE_API_URL,
   OVER_HISTORY_CACHE_TTL_MS,
+  LOG_PERSIST_LEVELS,
+  LOG_RETENTION_DAYS,
+  LOG_MAX_ERROR_CHARS,
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID,
   TELEGRAM_TRICK_CHAT_ID,

@@ -187,6 +187,18 @@ pm2 logs cricket-alert
 
 ---
 
+## Database footprint
+
+Every level prints to the console, but only `LOG_PERSIST_LEVELS` (default
+`ERROR,WARN,SUCCESS`) is written to MongoDB, and those rows expire on a TTL
+index after `LOG_RETENTION_DAYS`. `INFO`, `LIVE` and `DATABASE` are console-only
+by design: at a two-second poll they cost roughly one insert per log statement,
+which is how `systemlogs` previously reached 1.6M documents — 96% of the
+database — on a 512 MB cluster.
+
+Reducing the retention window later means dropping the TTL index first, since
+MongoDB will not silently change an existing index's expiry.
+
 ## Troubleshooting
 
 | Issue | Solution |

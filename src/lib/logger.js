@@ -1,8 +1,17 @@
 /**
  * lib/logger.js
  * Centralized premium logger with ANSI colors and descriptive emojis.
- * Dynamically pushes logs to MongoDB asynchronously without blocking the loop.
+ *
+ * Every level prints to the console. Only the levels in LOG_PERSIST_LEVELS are
+ * also written to MongoDB, and those expire on a TTL index — see
+ * db/models/SystemLog.js. Persisting every line turned out to cost roughly one
+ * insert per log statement on a two-second poll loop, which is how the
+ * collection reached 1.6M documents and 96% of the database.
  */
+
+const { LOG_PERSIST_LEVELS, LOG_MAX_ERROR_CHARS } = require('../config');
+
+const PERSISTED_LEVELS = new Set(LOG_PERSIST_LEVELS);
 
 const colors = {
   reset: "\x1b[0m",
@@ -25,6 +34,10 @@ let _SystemLog = null;
 let _isDbConnected = null;
 
 function saveToDb(level, message, error = null) {
+  // Checked first: a level we do not keep must not cost a require, a
+  // connection check or a round trip.
+  if (!PERSISTED_LEVELS.has(level)) return;
+
   try {
     if (!_SystemLog) _SystemLog = require('../db/models/SystemLog');
     if (!_isDbConnected) _isDbConnected = require('../db/connection').isDbConnected;
@@ -34,7 +47,7 @@ function saveToDb(level, message, error = null) {
 
   let errorDetails = null;
   if (error) {
-    errorDetails = error.stack || error.message || String(error);
+    errorDetails = String(error.stack || error.message || error).slice(0, LOG_MAX_ERROR_CHARS);
   }
   _SystemLog.create({ level, message, errorDetails }).catch(() => {});
 }
